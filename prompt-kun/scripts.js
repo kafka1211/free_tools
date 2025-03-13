@@ -861,8 +861,20 @@ function copyText(text) {
     //const header = `今日の日付:${currentDate}\n`;
     const header = "";
     const footer = `\n\n以上がインプット情報です。冒頭の指示に従ってください。\n\n`;
-    const finalText = header + text + footer;
-    
+    let finalText = header + text + footer;
+
+    // ▼▼▼ ここから追加：ハードコーディングされた置換処理 ▼▼▼
+    const replacements = [
+        { before: "置換前ワード1", after: "置換後ワード1" },
+        { before: "置換前ワード2", after: "置換後ワード2" }
+        // 必要な分だけ追加
+    ];
+    for (const { before, after } of replacements) {
+        // 全ての出現箇所を置換
+        finalText = finalText.split(before).join(after);
+    }
+    // ▲▲▲ 置換処理ここまで ▲▲▲
+
     // console.log("[DEBUG] copyText called. Final text length:", finalText.length);
     navigator.clipboard.writeText(finalText).then(
         function () {
