@@ -12,6 +12,10 @@
 2. [clipboard](./clipboard/)  
    - 選択したテキストファイル内容を Markdown 形式に整形し、クリップボードへコピーするツールを格納しています。  
 
+3. [markdown-to-excel](./markdown-to-excel/)
+   - Markdown から Excel(.xlsx) への変換ツールです。
+
+
 ## ライセンス
 
 このプロジェクトはMITライセンスの下で提供されています。

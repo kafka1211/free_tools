@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Markdown to Excel ver 1.0</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+</head>
+<body>
+  <h1>Markdown to Excel</h1>
+  <textarea id="markdownInput" rows="15" cols="70" placeholder="Enter Markdown content here..."></textarea>
+  <br>
+  <button onclick="convertMarkdownToExcel()">Excelに変換</button>
+
+  <script>
+    async function convertMarkdownToExcel() {
+      const markdownInput = document.getElementById("markdownInput").value;
+      const lines = markdownInput.split("\n");
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Sheet1");
+
+      // インデントを反映するための補助関数
+      const getIndentationLevel = (line) => {
+        const match = line.match(/^(\s*)/); // 行頭のスペースを取得
+        return match ? Math.floor(match[0].length / 2) : 0; // スペース2つで1インデントとみなす
+      };
+
+      const parseMixedMarkdown = (text) => {
+        const parts = [];
+        const regex = /(\*\*(.*?)\*\*|__(.*?)__|\*(.*?)\*|_(.*?)_|~~(.*?)~~|`(.*?)`)/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+          if (match.index > lastIndex) {
+            parts.push({
+              text: text.substring(lastIndex, match.index),
+              bold: false,
+              italic: false,
+              strike: false,
+              code: false,
+            });
+          }
+
+          if (match[2] || match[3]) {
+            // 太字 (**または __)
+            parts.push({
+              text: match[2] || match[3],
+              bold: true,
+              italic: false,
+              strike: false,
+              code: false,
+            });
+          } else if (match[4] || match[5]) {
+            // 斜体 (*または _)
+            parts.push({
+              text: match[4] || match[5],
+              bold: false,
+              italic: true,
+              strike: false,
+              code: false,
+            });
+          } else if (match[6]) {
+            // 打消し線 (~~)
+            parts.push({
+              text: match[6],
+              bold: false,
+              italic: false,
+              strike: true,
+              code: false,
+            });
+          } else if (match[8]) {
+            // インラインコード (`...`)
+            parts.push({
+              text: match[8],
+              bold: false,
+              italic: false,
+              strike: false,
+              code: true,
+            });
+          }
+
+          lastIndex = regex.lastIndex;
+        }
+
+        if (lastIndex < text.length) {
+          parts.push({
+            text: text.substring(lastIndex),
+            bold: false,
+            italic: false,
+            strike: false,
+            code: false,
+          });
+        }
+
+        // ネストされたスタイルを考慮してマージする
+        const mergedParts = [];
+        parts.forEach((part) => {
+          const lastPart = mergedParts[mergedParts.length - 1];
+          if (
+            lastPart &&
+            lastPart.bold === part.bold &&
+            lastPart.italic === part.italic &&
+            lastPart.strike === part.strike &&
+            lastPart.code === part.code
+          ) {
+            // スタイルが同じならテキストを結合
+            lastPart.text += part.text;
+          } else {
+            // スタイルが異なる場合は新しいパートとして追加
+            mergedParts.push(part);
+          }
+        });
+
+        return mergedParts;
+      };
+
+      const applyStylesToCell = (cell, parts, isTableCell = false, isHeaderCell = false) => {
+        if (parts.length === 1) {
+          // 単一のスタイルの場合
+          const part = parts[0];
+          cell.value = part.text;
+          cell.font = {
+            bold: part.bold,
+            italic: part.italic,
+            strike: part.strike,
+            name: "Meiryo UI",
+            color: part.code ? { argb: "FFFF00FF" } : undefined, // コードの場合は紫色（例）にする
+          };
+        } else {
+          // 複数スタイルを適用 (リッチテキスト)
+          cell.value = {
+            richText: parts.map((part) => ({
+              text: part.text,
+              font: {
+                bold: part.bold,
+                italic: part.italic,
+                strike: part.strike,
+                name: "Meiryo UI",
+                color: part.code ? { argb: "FFFF00FF" } : undefined, // コードの場合は紫色（例）にする
+              },
+            })),
+          };
+        }
+
+        // セルの罫線を適用 (テーブルセルの場合のみ)
+        if (isTableCell) {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
+        }
+
+        // ヘッダーセルの背景色を適用
+        if (isHeaderCell) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFADD8E6" }, // 水色
+          };
+        }
+      };
+
+      let isInsideCodeBlock = false; // コードブロック内かどうかを判定するフラグ
+      let codeBlockLanguage = ""; // コードブロックの言語
+
+      // テーブルブロック状態管理の変数
+      let inTable = false;
+      let tableHeaderAdded = false;
+
+      lines.forEach((line, index) => {
+        const trimmedLine = line.trim();
+
+        if (line === "") {
+          // 改行だけの行を空行として反映
+          worksheet.addRow([]);
+          return;
+        }
+
+        if (trimmedLine.startsWith("```")) {
+          // コードブロックの開始または終了
+          if (isInsideCodeBlock) {
+            // コードブロック終了
+            isInsideCodeBlock = false;
+            codeBlockLanguage = "";
+          } else {
+            // コードブロック開始
+            isInsideCodeBlock = true;
+            codeBlockLanguage = trimmedLine.slice(3).trim();
+            if (codeBlockLanguage) {
+              console.log("Code block language:", codeBlockLanguage);
+            }
+          }
+          return; // コードブロックの開始・終了行はシートには追加しない
+        }
+
+        if (isInsideCodeBlock) {
+          // コードブロック内の行はそのまま出力
+          const row = worksheet.addRow([line]);
+          const cell = row.getCell(1);
+          cell.font = { name: "Courier New", color: { argb: "FF000000" } }; // コードブロック用のフォント
+          cell.alignment = { vertical: "top", horizontal: "left" };
+          return;
+        }
+
+        // Markdownテーブルの行の場合
+        if (trimmedLine.startsWith("|") && trimmedLine.includes("|", 1)) {
+          // テーブルブロック中であることをフラグで管理
+          inTable = true;
+          const cells = trimmedLine.split("|").map(cell => cell.trim());
+          // 最初と最後の空セルを削除
+          if (cells[0] === "") cells.shift();
+          if (cells[cells.length - 1] === "") cells.pop();
+
+          // 区切り行かどうか判定（全セルがハイフンのみの場合）
+          const isDivider = cells.every(cell => /^-+$/.test(cell));
+
+          if (!tableHeaderAdded) {
+            // 最初の非区切り行をヘッダー行として扱う
+            if (isDivider) {
+              // ヘッダー行が区切り行になっていたらスキップ
+              return;
+            }
+            const row = worksheet.addRow(["", ...cells]); // 1列目を空セルにして右にずらす
+            row.eachCell((cell, colNumber) => {
+              if (colNumber > 1) { // 1列目は空セルのためスキップ
+                applyStylesToCell(cell, [{ text: cell.value }], true, true);
+              }
+            });
+            tableHeaderAdded = true;
+          } else {
+            if (isDivider) {
+              // 区切り行は出力せずにスキップ
+              return;
+            }
+            // ヘッダー行以降の行は明細行として扱う
+            const row = worksheet.addRow(["", ...cells]);
+            row.eachCell((cell, colNumber) => {
+              if (colNumber > 1) {
+                applyStylesToCell(cell, [{ text: cell.value }], true, false);
+              }
+            });
+          }
+          return;
+        } else {
+          // テーブル以外の行が現れたらテーブルブロック状態をリセット
+          if (inTable) {
+            inTable = false;
+            tableHeaderAdded = false;
+          }
+        }
+
+        // 水平線 (3つ以上の -, _, * のみの行)
+        if (/^[-*_]{3,}$/.test(trimmedLine)) {
+          const row = worksheet.addRow([]);
+          row.height = 5; // 行の高さを小さくして水平線を強調
+          worksheet.mergeCells(`A${row.number}:Z${row.number}`); // シート全体に広げる
+          const cell = worksheet.getCell(`A${row.number}`);
+          cell.border = {
+            bottom: { style: "thin" },
+          };
+        } else if (trimmedLine.startsWith("#")) {
+          // 見出し (# の数に応じてレベルを変える)
+          const level = trimmedLine.match(/#+/)[0].length;
+          const content = trimmedLine.replace(/^#+\s*/, "");
+          const parts = parseMixedMarkdown(content);
+          const row = worksheet.addRow([]);
+          const cell = row.getCell(1);
+          applyStylesToCell(cell, parts);
+          cell.font = { ...cell.font, size: 14 + (6 - level) }; // 見出しに応じたフォントサイズを設定
+        } else if (trimmedLine.startsWith("- ") || trimmedLine.startsWith("* ")) {
+          // 箇条書きリスト (番号なしリスト)
+          const level = getIndentationLevel(line) + 1; // リストの場合は1つ多くインデント
+          const content = trimmedLine.replace(/^[-*\s]+/, "");
+          const parts = parseMixedMarkdown(content);
+          const row = worksheet.addRow([]);
+          const cell = row.getCell(level + 1);
+          applyStylesToCell(cell, [{ text: "・", bold: false }, ...parts]);
+        } else if (trimmedLine.match(/^\d+\.\s+/)) {
+          // 番号付きリスト
+          const level = getIndentationLevel(line) + 1;
+          const numberMatch = trimmedLine.match(/^(\d+)\.\s+/);
+          const number = numberMatch ? numberMatch[1] : "";
+          const content = trimmedLine.replace(/^\d+\.\s*/, "");
+          const parts = parseMixedMarkdown(content);
+          const row = worksheet.addRow([]);
+          const cell = row.getCell(level + 1);
+          applyStylesToCell(cell, [{ text: `${number}. `, bold: false }, ...parts]);
+        } else {
+          // 普通のテキスト行
+          const level = getIndentationLevel(line);
+          const content = parseMixedMarkdown(trimmedLine);
+          const row = worksheet.addRow([]);
+          const cell = row.getCell(level + 1);
+          applyStylesToCell(cell, content);
+        }
+      });
+
+      // Excelファイルをダウンロード
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "markdown_to_excel.xlsx";
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>
