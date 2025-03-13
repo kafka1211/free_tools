@@ -1,0 +1,49 @@
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: space-between;
+    padding: 20px;
+    margin-top: 40px;
+    background-color: #e6f3e6;
+    color: #2e4a2e;
+}
+#file-content,
+#file-list {
+    width: 45%;
+    margin-right: 10px;
+}
+#drop-zone {
+    border: 2px dashed #4a724a;
+    padding: 20px;
+    text-align: center;
+    background-color: #ffffff;
+}
+.file-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px;
+    border-bottom: 1px solid #b8d8b8;
+}
+.delete-btn:hover {
+    cursor: pointer;
+    color: #4a724a;
+}
+.btn {
+    background-color: #a8c8a8;
+    color: #2e4a2e;
+}
+.btn:hover {
+    background-color: #90b090;
+}
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #e6f3e6;
+}
+::-webkit-scrollbar-thumb {
+    background: #90b090;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #4a724a;
+}

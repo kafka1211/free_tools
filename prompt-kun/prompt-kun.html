@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link
+        href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        rel="stylesheet"
+    />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>プロンプトくん ver 1.6</title>
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="d-flex">
+            <div id="file-content" class="p-3 border flex-fill">
+                <div id="selected-file" class="p-1 font-weight-bold"></div>
+                <div class="mb-2">
+                    <div id="description" class="p-2 small"></div>
+                </div>
+                <label for="prompt" class="font-weight-bold">プロンプト: </label>
+                <textarea
+                    id="prompt" 
+                    rows="5"
+                    class="form-control mb-2"
+                    placeholder="ここにプロンプトを入力してください。"
+                  ></textarea>
+                <div class="mb-2">
+                    <label for="input-files" class="font-weight-bold">
+                        必要なドキュメント (テキスト / Excel / Word / PDF / PowerPoint): <br>
+                    </label>
+                    <div class="alert alert-danger" role="alert">
+                        <small>※エクセル内の全シート、セル内の文字情報は並びも含めて取得します。オブジェクト（図形、吹き出し）内の文字情報も取得します。ただし、オブジェクト間のつながり（矢印など）、オブジェクトの配置位置は取得できないため、その部分の精度は下がります。</small>
+                    </div>
+
+                    <div id="input-files" class="p-2 small"></div>
+                    <div class="alert alert-warning" role="alert">
+                        <small>※ドキュメントが大量の場合は、一度にすべてを添付するとAIの文字数オーバーになる場合があります。</small>
+                    </div>
+
+
+                </div>
+                <div
+                    id="drop-zone"
+                    ondrop="dropHandler(event)"
+                    ondragover="dragOverHandler(event)"
+                    class="mt-3"
+                >
+                必要なドキュメントをドラッグ＆ドロップで追加
+                </div>
+                <div id="dropped-files" class="mt-3"></div>
+                <button onclick="copyToClipboard()" class="btn btn-primary mr-2">
+                    クリップボードにコピー ＋ AIに連携
+                </button>
+                <button onclick="clearAll()" class="btn btn-secondary">クリア</button>
+            </div>
+            <div id="file-list" class="p-3 border flex-fill">
+                <p>プロンプトテンプレート指定:</p>
+                <p>
+                    ./prompt/
+                </p>
+            <div class="custom-file mb-3">
+                <input
+                    type="file"
+                    class="custom-file-input"
+                    webkitdirectory
+                    directory
+                    multiple
+                    onchange="listFiles(event)"
+                />
+                <label class="custom-file-label" for="customFile">フォルダを選択</label>
+              </div>
+              <div
+                  id="file-list-container"
+                  class="overflow-auto"
+                  style="max-height: 500px"
+              ></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS, Popper.js, and jQuery -->
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
+    <!-- encoding JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+
+    <!-- ▼▼▼ ここから追加ライブラリ (Excel, PDF, Word対応) ▼▼▼ -->
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
+    ></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"
+    ></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.5.1/mammoth.browser.min.js"
+    ></script>
+    <!-- ★★★ Wordの図形抽出に必要なJSZipを追加 ★★★ -->
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+    ></script>
+    <!-- ▲▲▲ 追加ライブラリここまで ▲▲▲ -->
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako_inflate.min.js"
+    ></script>
+    <script src="./scripts.js"></script>
+</body>
+</html>
