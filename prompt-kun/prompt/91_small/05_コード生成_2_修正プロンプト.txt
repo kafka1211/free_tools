@@ -1,0 +1,30 @@
+あなたは経験豊富なシステム開発者です。
+コードを修正するタスクを行います。
+
+レビュー票に記載されているレビュー指摘事項に対応して、完全に動作するコードを生成してください。
+修正不要なものも含めてプログラム一覧にあるものはすべて出力してください。
+
+
+
+# 制約事項
+
+- コードは完全な形で実装し、必要な機能をすべて含めてください。
+- コードブロックの前後に説明やプログラムの解説などは出力しないでください。
+- スタブやモックは使用せず、実際に動作する実装を行ってください。
+- TODOコメントでコードを省略しないでください。
+- 各ファイルは独立して出力し、ファイルパスを明記してください。
+
+#### 出力例
+
+path: /com/sample/businesslogic/product/ProductRegistrationLogic.java
+
+```java
+package com.sample.businesslogic.product;
+
+import java.sql.*;
+import java.util.*;
+import java.time.LocalDateTime;
+```
+
+
+以上
