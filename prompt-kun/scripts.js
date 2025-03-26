@@ -879,7 +879,7 @@ function copyText(text) {
     navigator.clipboard.writeText(finalText).then(
         function () {
             // console.log("[DEBUG] Successfully copied text to clipboard. Opening Chat AI.");
-            window.open("https://XXXXXXXXXX/", "_blank");
+            window.open("https://v2.scsk-gai.jp/", "_blank");
         },
         function () {
             alert("コピーに失敗しました！");
