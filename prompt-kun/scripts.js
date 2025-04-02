@@ -91,7 +91,7 @@ function dragOverHandler(event) {
 
 // ▼▼▼ Excel, Word, PDFを判定するための拡張子判定関数 ▼▼▼
 function isExcelFile(file) {
-    return /\.(xlsx|xls)$/i.test(file.name);
+    return /\.(xlsx|xls|xlsm)$/i.test(file.name);
 }
 function isWordFile(file) {
     // 一般的にはdocx解析を想定。docの場合はライブラリで失敗することがあります。
