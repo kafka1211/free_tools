@@ -373,7 +373,10 @@ async function readExcelFile(file) {
             // 4. 最終的なデータをTSV化
             if (finalData.length > 0) {
                 const newSheet = XLSX.utils.aoa_to_sheet(finalData);
-                const tsv = XLSX.utils.sheet_to_csv(newSheet, { FS: '\t' });
+                let tsv = XLSX.utils.sheet_to_csv(newSheet, { FS: '\t' });
+                const lines = tsv.split('\n');
+                const trimmedLines = lines.map(line => line.replace(/\t+$/, '')); // 正規表現で末尾の連続するタブを削除
+                tsv = trimmedLines.join('\n');
                 text += `【Sheet: ${sheetName}】\n${tsv}\n\n\n`;
             } else {
                  // シートが完全に空になった場合 (元のデータが空 or 空行/空列削除の結果)
