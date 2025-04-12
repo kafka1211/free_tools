@@ -287,6 +287,7 @@ function parseShapeXml(xmlString, fileName, sheetName) {
 }
 
 // ▼▼▼ 3-3. Excel ファイル読み込みを async 化し、図形内テキストも抽出 ▼▼▼
+// ★★★ 改良：空行・空列削除、セル内整形処理を追加 ★★★
 async function readExcelFile(file) {
     // console.log("[DEBUG] readExcelFile called (async):", file.name);
     const data = new Uint8Array(await file.arrayBuffer());  // FileReader不要でも読み込めるが、従来通りでもOK
@@ -305,26 +306,101 @@ async function readExcelFile(file) {
         workbook.SheetNames.forEach(sheetName => {
             // console.log("[DEBUG] Processing sheet:", sheetName);
             const sheet = workbook.Sheets[sheetName];
-            // シートごとにTSV化（区切り文字をタブに設定）
-            const tsv = XLSX.utils.sheet_to_csv(sheet, { FS: '\t' });
-            text += `【Sheet: ${sheetName}】\n${tsv}\n\n\n`;
 
-            // シート内のコメントも出力する
+            // ★★★ ここから改良 ★★★
+            // 1. シートを2次元配列に変換 (空セルは "" とする)
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+            // 2. セル内容の前処理 & 空行削除
+            const processedData = jsonData.map(row => {
+                return row.map(cell => {
+                    // セルの型チェックと前処理
+                    let cellValue = cell;
+                    if (cellValue === null || cellValue === undefined) {
+                        cellValue = ""; // nullやundefinedは空文字列に
+                    } else {
+                        cellValue = String(cellValue); // 文字列に変換
+                    }
+
+                    // 改行とタブをスペースに置換
+                    let cleanedCell = cellValue.replace(/[\n\t]+/g, ' ');
+                    // 連続する空白を1つに正規化
+                    cleanedCell = cleanedCell.replace(/\s{2,}/g, ' ');
+                    // 前後の空白を削除
+                    cleanedCell = cleanedCell.trim();
+                    // 結果が空白のみの場合は空文字列にする
+                    return cleanedCell;
+                });
+            }).filter(row => row.some(cell => cell !== "")); // 実質的に空でない行のみを残す
+
+            // 3. 空列削除
+            let finalData = [];
+            if (processedData.length > 0) {
+                const numCols = Math.max(...processedData.map(row => row.length)); // 最大列数を取得
+                const colsToRemove = new Set();
+
+                for (let j = 0; j < numCols; j++) {
+                    let isColEmpty = true;
+                    for (let i = 0; i < processedData.length; i++) {
+                        // processedData[i][j] が範囲外 or 空文字列でないかチェック
+                        if (processedData[i] && processedData[i][j] !== undefined && processedData[i][j] !== "") {
+                            isColEmpty = false;
+                            break;
+                        }
+                    }
+                    if (isColEmpty) {
+                        colsToRemove.add(j);
+                    }
+                }
+
+                // 空でない列だけを含む新しいデータを作成
+                finalData = processedData.map(row => {
+                    const newRow = [];
+                    const originalLength = row.length;
+                    for (let j = 0; j < numCols; j++) { // 最大列数までループ
+                        if (!colsToRemove.has(j)) {
+                            // 元の行にその列が存在すれば値を追加、なければ空文字列
+                            newRow.push(j < originalLength && row[j] !== undefined ? row[j] : "");
+                        }
+                    }
+                    return newRow;
+                });
+
+                // 再度、空行が発生していないかチェック (空列削除の結果、行が空になる場合があるため)
+                finalData = finalData.filter(row => row.some(cell => cell !== ""));
+            }
+
+            // 4. 最終的なデータをTSV化
+            if (finalData.length > 0) {
+                const newSheet = XLSX.utils.aoa_to_sheet(finalData);
+                const tsv = XLSX.utils.sheet_to_csv(newSheet, { FS: '\t' });
+                text += `【Sheet: ${sheetName}】\n${tsv}\n\n\n`;
+            } else {
+                 // シートが完全に空になった場合 (元のデータが空 or 空行/空列削除の結果)
+                 text += `【Sheet: ${sheetName}】\n(シートは空、または有効なデータがありません)\n\n\n`;
+            }
+            // ★★★ 改良ここまで ★★★
+
+
+            // シート内のコメントも出力する (既存のコードは変更しない)
             if (sheet["!comments"] && sheet["!comments"].length > 0) {
                 // console.log("[DEBUG] Found comments in sheet:", sheetName);
                 text += `【Comments in ${sheetName}】\n`;
                 sheet["!comments"].forEach(comment => {
                     const author = comment.a || "unknown";
-                    text += `Cell ${comment.ref} (by ${author}): ${comment.t}\n`;
+                    // コメントテキストも整形処理を適用するか？ -> 指示にはないので、元のままにしておく
+                    const commentText = comment.t || "";
+                    text += `Cell ${comment.ref} (by ${author}): ${commentText}\n`;
                 });
                 text += "\n";
             }
         });
 
-        // 図形(Shapes)の中のテキストを取得（非同期）
+        // 図形(Shapes)の中のテキストを取得（非同期） (既存のコードは変更しない)
         const shapeText = await extractShapeTextFromWorkbookAsync(workbook);
         if (shapeText.trim()) {
             // console.log("[DEBUG] shapeText extracted length:", shapeText.length);
+             // 図形テキストの整形処理は別途検討が必要だが、指示にはないので元のまま
             text += `【Shapes Overall】\n${shapeText}\n`;
         } else {
             // console.log("[DEBUG] No shapeText extracted.");
@@ -333,7 +409,7 @@ async function readExcelFile(file) {
         return text;
     } catch (error) {
         console.error("[DEBUG] Error in readExcelFile:", error);
-        throw error;
+        throw error; // エラーを呼び出し元に伝播させる
     }
 }
 
@@ -879,7 +955,7 @@ function copyText(text) {
     navigator.clipboard.writeText(finalText).then(
         function () {
             // console.log("[DEBUG] Successfully copied text to clipboard. Opening Chat AI.");
-            window.open("https://v2.scsk-gai.jp/", "_blank");
+            window.open("https://XXXXXXXXXX/", "_blank");
         },
         function () {
             alert("コピーに失敗しました！");
