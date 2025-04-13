@@ -7,7 +7,7 @@
     />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>プロンプトくん ver 1.8</title>
+    <title>プロンプトくん ver 2.00</title>
     <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -30,7 +30,7 @@
                         必要なドキュメント (テキスト / Excel / Word / PDF / PowerPoint): <br>
                     </label>
                     <div class="alert alert-danger" role="alert">
-                        <small>※エクセル内の全シート、セル内の文字情報は並びも含めて取得します。オブジェクト（図形、吹き出し）内の文字情報も取得します。ただし、オブジェクト間のつながり（矢印など）、オブジェクトの配置位置は取得できないため、その部分の精度は下がります。</small>
+                        <small>※Excelファイル内の全シートを対象に、文字情報は配置位置を考慮してテキスト化します。図形オブジェクト内の文字情報も取得し、可能な限り配置も再現します。ただし、図形オブジェクト間のつながり（矢印など）は取得できません。また、空の列と行は削除してテキストサイズを小さくします。</small>
                     </div>
 
                     <div id="input-files" class="p-2 small"></div>

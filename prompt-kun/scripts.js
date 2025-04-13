@@ -201,90 +201,541 @@ async function createSheetNameMap(workbook) {
     return sheetNameMap;
 }
 
-// 図形テキスト抽出関数を修正
-async function extractShapeTextFromWorkbookAsync(workbook) {
-    let shapeText = "";
-    if (!workbook || !workbook.files) return shapeText;
-
-    // シート名マップを作成
-    const sheetNameMap = await createSheetNameMap(workbook);
-    
-    const fileNames = Object.keys(workbook.files);
-
-    for (const fileName of fileNames) {
-        if (
-            /^xl\/drawings\/drawing\d+\.xml$/i.test(fileName) ||
-            /^xl\/drawings\/vmlDrawing\d+\.vml$/i.test(fileName)
-        ) {
-            const fileObj = workbook.files[fileName];
-            if (!fileObj) continue;
-
-            // drawingXMLとシートの関係を取得
-            const drawingMatch = fileName.match(/drawing(\d+)\.(?:xml|vml)$/i);
-            const drawingNum = drawingMatch ? drawingMatch[1] : null;
-            let sheetName = "不明なシート";
-
-            if (drawingNum) {
-                sheetName = sheetNameMap.get(drawingNum) || "不明なシート";
-            }
-
-            const xmlString = await getStringFromZipFileAsync(fileObj);
-            shapeText += parseShapeXml(xmlString, fileName, sheetName);
-        }
-    }
-
-    return shapeText;
-}
-
-// parseShapeXml関数を修正
-function parseShapeXml(xmlString, fileName, sheetName) {
-    let result = "";
+function parseShapeXml(xmlString, fileName) {
+    const results = []; // { row: number, col: number, text: string } の配列
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlString, "application/xml");
 
-    if (xmlDoc.getElementsByTagName("parsererror").length > 0) {
-        console.warn(`XML parse error in ${fileName}`);
-        return result;
+    // ★★★ 名前空間の定義 (Excel DrawingMLで一般的に使われるもの) ★★★
+    const xdrNamespace = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    const aNamespace = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+    const parserError = xmlDoc.getElementsByTagName("parsererror")[0];
+    if (parserError) {
+        // console.warn(`XML parse error in ${fileName}:`, parserError.textContent); // デバッグ用ログは維持
+        return results; // 空配列を返す
     }
 
-    const aTList = xmlDoc.getElementsByTagName("a:t");
-    if (aTList.length > 0) {
-        result += `【Shapes in "${sheetName}"】\n`;
-        for (let i = 0; i < aTList.length; i++) {
-            const text = aTList[i].textContent;
-            if (text.trim()) {
-                result += text + "\n";
+    // 1) XML (drawing.xml) 内の <xdr:sp> からテキストと位置を取得
+    if (fileName.toLowerCase().endsWith('.xml')) {
+        // ★★★ 名前空間を指定して <xdr:sp> 要素を取得 ★★★
+        const shapes = xmlDoc.getElementsByTagNameNS(xdrNamespace, "sp");
+        // console.log(`[DEBUG] Found ${shapes.length} <xdr:sp> elements in ${fileName}`);
+
+        for (let i = 0; i < shapes.length; i++) { // デバッグしやすいように for ループに変更
+            const shape = shapes[i];
+            // console.log(`[DEBUG] Processing shape #${i}:`, shape.outerHTML.substring(0, 300)); // 要素の構造を一部表示
+
+             // ★★★ 名前空間を指定して <a:t> 要素を取得 ★★★
+            const tElements = shape.getElementsByTagNameNS(aNamespace, "t");
+            const originalText = Array.from(tElements).map(el => el.textContent).join("");
+
+            // 1. 改行・タブをスペースに置換
+            let cleanedText = originalText.replace(/[\n\t]+/g, ' ');
+            // 2. 連続する空白を1つに正規化
+            cleanedText = cleanedText.replace(/\s{2,}/g, ' ');
+            // 3. 前後の空白を削除
+            cleanedText = cleanedText.trim();
+
+            if (cleanedText) { // 整形後のテキストが空でない場合のみ追加
+                // console.log(`[DEBUG] Found cleaned text in shape #${i}: "${cleanedText}"`);
+                let row = Infinity, col = Infinity; // デフォルト値（位置情報がない場合）
+                let anchorElement = null; // twoCellAnchor or oneCellAnchor or null
+                let anchorType = null; // 'twoCell' or 'oneCell' or null
+
+                // 位置情報の取得ロジック
+                // shape要素の直接の親要素を取得 (通常は twoCellAnchor, oneCellAnchor, grpSp のいずれか)
+                const parentElement = shape.parentElement;
+
+                if (parentElement) {
+                    const parentTagName = parentElement.tagName.toLowerCase();
+                    // console.log(`[DEBUG] Parent element tag name for shape #${i}: ${parentTagName}`);
+
+                    // 親がアンカー要素の場合
+                    if (parentTagName === 'xdr:twocellanchor' || parentTagName === 'twoCellAnchor') {
+                        anchorElement = parentElement;
+                        anchorType = 'twoCell';
+                        // console.log(`[DEBUG] Anchor found in direct parent (twoCellAnchor) for shape #${i}`);
+                    } else if (parentTagName === 'xdr:onecellanchor' || parentTagName === 'oneCellAnchor') {
+                        anchorElement = parentElement;
+                        anchorType = 'oneCell';
+                        // console.log(`[DEBUG] Anchor found in direct parent (oneCellAnchor) for shape #${i}`);
+                    }
+                    // 親がグループ要素の場合、さらにその親のアンカーを探す
+                    else if (parentTagName === 'xdr:grpsp' || parentTagName === 'grpSp') {
+                        // console.log(`[DEBUG] Shape #${i} is inside a group.`);
+                        const grandParentElement = parentElement.parentElement;
+                        if (grandParentElement) {
+                             const grandParentTagName = grandParentElement.tagName.toLowerCase();
+                             // console.log(`[DEBUG] Grandparent element tag name for shape #${i} (inside group): ${grandParentTagName}`);
+                             if (grandParentTagName === 'xdr:twocellanchor' || grandParentTagName === 'twoCellAnchor') {
+                                 anchorElement = grandParentElement;
+                                 anchorType = 'twoCell';
+                                 // console.log(`[DEBUG] Anchor found in grandparent (twoCellAnchor) for grouped shape #${i}`);
+                             } else if (grandParentTagName === 'xdr:onecellanchor' || grandParentTagName === 'oneCellAnchor') {
+                                 anchorElement = grandParentElement;
+                                 anchorType = 'oneCell';
+                                 // console.log(`[DEBUG] Anchor found in grandparent (oneCellAnchor) for grouped shape #${i}`);
+                             }
+                        }
+                    }
+                } else {
+                    // console.log(`[DEBUG] Shape #${i} has no parentElement.`);
+                }
+
+                // アンカー要素が見つかった場合、座標を取得 (変更なし)
+                if (anchorElement && anchorType) {
+                    const fromEl = anchorElement.getElementsByTagNameNS(xdrNamespace, "from")[0];
+                    let fromRow = Infinity, fromCol = Infinity;
+                    if (fromEl) {
+                        const rowEl = fromEl.getElementsByTagNameNS(xdrNamespace, "row")[0];
+                        const colEl = fromEl.getElementsByTagNameNS(xdrNamespace, "col")[0];
+                        fromRow = parseInt(rowEl?.textContent || Infinity, 10);
+                        fromCol = parseInt(colEl?.textContent || Infinity, 10);
+                        if (isNaN(fromRow)) fromRow = Infinity;
+                        if (isNaN(fromCol)) fromCol = Infinity;
+                        // console.log(`[DEBUG] Parsed 'from': row=${fromRow}, col=${fromCol}`);
+                    } else {
+                        // console.log(`[DEBUG] 'from' element not found in anchor for shape #${i}.`);
+                    }
+
+                    // twoCellAnchor の場合は 'to' も取得して中央値を計算
+                    if (anchorType === 'twoCell') {
+                        const toEl = anchorElement.getElementsByTagNameNS(xdrNamespace, "to")[0];
+                        let toRow = Infinity, toCol = Infinity;
+                        if (toEl) {
+                            const rowEl = toEl.getElementsByTagNameNS(xdrNamespace, "row")[0];
+                            const colEl = toEl.getElementsByTagNameNS(xdrNamespace, "col")[0];
+                            toRow = parseInt(rowEl?.textContent || Infinity, 10);
+                            toCol = parseInt(colEl?.textContent || Infinity, 10);
+                            if (isNaN(toRow)) toRow = Infinity;
+                            if (isNaN(toCol)) toCol = Infinity;
+                            // console.log(`[DEBUG] Parsed 'to': row=${toRow}, col=${toCol}`);
+                        } else {
+                            // console.log(`[DEBUG] 'to' element not found in twoCellAnchor for shape #${i}.`);
+                        }
+
+                        // 中央値を計算 (両方が有効な場合のみ)
+                        if (fromRow !== Infinity && toRow !== Infinity) {
+                            row = Math.floor((fromRow + toRow) / 2);
+                        } else {
+                            row = fromRow; // to がなければ from を使う
+                        }
+                        if (fromCol !== Infinity && toCol !== Infinity) {
+                            col = Math.floor((fromCol + toCol) / 2);
+                        } else {
+                            col = fromCol; // to がなければ from を使う
+                        }
+                         // console.log(`[DEBUG] Calculated center (twoCell): row=${row}, col=${col}`);
+
+                    }
+                    // oneCellAnchor の場合は 'from' の値を使う
+                    else if (anchorType === 'oneCell') {
+                        row = fromRow;
+                        col = fromCol;
+                        // console.log(`[DEBUG] Using 'from' (oneCell): row=${row}, col=${col}`);
+                    }
+                } else {
+                     // console.log(`[DEBUG] Anchor element not found for text "${cleanedText}" in shape #${i}. Using default (Infinity, Infinity).`);
+                }
+
+                // 最終的な row, col が Infinity でないことを確認 (念のため)
+                if (row === Infinity || col === Infinity) {
+                    // console.log(`[DEBUG] Final position is Infinity for text "${cleanedText}" in shape #${i}.`);
+                }
+                 // console.log(`[DEBUG] Final position for text "${cleanedText}": row=${row}, col=${col}`);
+                results.push({ row, col, text: cleanedText });
+            } else {
+                 // console.log(`[DEBUG] Shape #${i} has no text content after cleaning.`);
             }
         }
-        result += "\n";
     }
-
     // 2) VML (vmlDrawing.vml) 内の <v:shape>～<v:textbox>～ テキストを取り出す
-    const shapeList = xmlDoc.getElementsByTagName("v:shape");
-    if (shapeList.length > 0) {
-        // console.log(`[DEBUG] Found <v:shape> elements in ${fileName}:`, shapeList.length);
-        result += `【VML Shapes in ${fileName}】\n`;
-        for (let i = 0; i < shapeList.length; i++) {
-            const shape = shapeList[i];
-            // テキストボックス要素を探す
-            const textBoxList = shape.getElementsByTagName("v:textbox");
-            if (textBoxList.length > 0) {
-                // console.log(`[DEBUG] Found <v:textbox> in shape #${i}:`, textBoxList.length);
-                // さらに中のdivなどをテキスト化
-                for (let j = 0; j < textBoxList.length; j++) {
-                    const tb = textBoxList[j];
-                    const innerText = tb.textContent;
-                    if (innerText.trim()) {
-                        result += innerText + "\n";
+    else if (fileName.toLowerCase().endsWith('.vml')) {
+        // VMLの名前空間は通常自動で解決されることが多いが、必要なら追加
+        // const vNamespace = "urn:schemas-microsoft-com:vml";
+        const shapeList = xmlDoc.getElementsByTagName("v:shape"); // VMLは名前空間なしでも取得できることが多い
+        if (shapeList.length > 0) {
+            // result += `【VML Shapes in ${fileName}】\n`; // ヘッダー削除
+            for (let i = 0; i < shapeList.length; i++) {
+                const shape = shapeList[i];
+                // テキストボックス要素を探す
+                const textBoxList = shape.getElementsByTagName("v:textbox");
+                if (textBoxList.length > 0) {
+                    // console.log(`[DEBUG] Found <v:textbox> in shape #${i}:`, textBoxList.length);
+                    // さらに中のdivなどをテキスト化
+                    for (let j = 0; j < textBoxList.length; j++) {
+                        const tb = textBoxList[j];
+                        const originalInnerText = tb.textContent;
+
+                        // 1. 改行・タブをスペースに置換
+                        let cleanedInnerText = originalInnerText.replace(/[\n\t]+/g, ' ');
+                        // 2. 連続する空白を1つに正規化
+                        cleanedInnerText = cleanedInnerText.replace(/\s{2,}/g, ' ');
+                        // 3. 前後の空白を削除
+                        cleanedInnerText = cleanedInnerText.trim();
+
+                        if (cleanedInnerText) { // 整形後のテキストが空でない場合
+                             // VMLは位置情報がないので、row/colはInfinityとして追加
+                            results.push({ row: Infinity, col: Infinity, text: cleanedInnerText });
+                            // result += innerText + "\n"; // 元の文字列結合ロジック削除
+                        }
                     }
                 }
             }
+            // result += "\n"; // 末尾の改行削除
         }
-        result += "\n";
     }
 
-    return result;
+    // ★重要: parseShapeXml内ではソートしない。呼び出し元でシートごとにまとめた後ソートする。
+    // ★重要: parseShapeXml内ではシート名ヘッダーを追加しない。
+
+    return results; // { row, col, text } の配列を返す
 }
+
+
+async function extractShapeTextFromWorkbookAsync(workbook) {
+    const shapesBySheet = new Map(); // キー: シート名, 値: [{ row, col, text }] の配列
+
+    if (!workbook || !workbook.files) return "";
+
+    // 1. シート名とインデックスのマッピングを作成
+    const sheetNameMap = await createSheetNameMap(workbook);
+    // console.log("[DEBUG] sheetNameMap:", sheetNameMap);
+
+    // 2. シートと描画ファイルの関係を解析
+    const sheetDrawingRelMap = new Map(); // キー: drawing#.xml (e.g., 'drawing1.xml'), 値: シートインデックス (文字列, e.g., '0')
+    const sheetRelFiles = Object.keys(workbook.files).filter(fn => /^xl\/worksheets\/_rels\/sheet\d+\.xml\.rels$/i.test(fn));
+    // console.log("[DEBUG] Found sheet relation files:", sheetRelFiles);
+
+    for (const relFileName of sheetRelFiles) {
+        const sheetMatch = relFileName.match(/sheet(\d+)\.xml\.rels$/i);
+        if (!sheetMatch) continue;
+        const sheetIndex = parseInt(sheetMatch[1], 10) - 1; // シートインデックス (0始まり)
+        // console.log(`[DEBUG] Processing relations for sheet index: ${sheetIndex} (from ${relFileName})`);
+
+        const relFileObj = workbook.files[relFileName];
+        if (!relFileObj) continue;
+
+        try {
+            const relXmlString = await getStringFromZipFileAsync(relFileObj);
+            const parser = new DOMParser();
+            const relXmlDoc = parser.parseFromString(relXmlString, 'application/xml');
+            const relationships = relXmlDoc.getElementsByTagName('Relationship');
+
+            for (let i = 0; i < relationships.length; i++) {
+                const rel = relationships[i];
+                const type = rel.getAttribute('Type');
+                const target = rel.getAttribute('Target');
+
+                // 描画ファイル (drawing.xml) への参照を探す
+                if (type && type.endsWith('/drawing') && target) {
+                    // target は "../drawings/drawing1.xml" のような形式
+                    const drawingFileName = target.substring(target.lastIndexOf('/') + 1);
+                    // console.log(`[DEBUG] Found drawing relation: ${drawingFileName} relates to sheet index ${sheetIndex}`);
+                    sheetDrawingRelMap.set(drawingFileName, String(sheetIndex)); // マップに格納
+                    break; // 通常、シートごとにdrawingは1つのはず
+                }
+                // VML (vmlDrawing.vml) への参照も考慮する (あれば)
+                // 注: VMLの関連付けはdrawingより不明瞭なことが多い
+                if (type && type.endsWith('/vmlDrawing') && target) {
+                    const vmlFileName = target.substring(target.lastIndexOf('/') + 1);
+                     // VMLの場合はシートインデックスとの関連付けが保証されない場合があるため、
+                     // drawing が見つからなければ VML の関連を暫定的に使う、などの考慮が必要かもしれない。
+                     // 一旦 drawing を優先し、VML の関連付けはここでは積極的に利用しない。
+                    // console.log(`[DEBUG] Found VML drawing relation: ${vmlFileName} relates to sheet index ${sheetIndex} (Might be less reliable)`);
+                    // sheetDrawingRelMap.set(vmlFileName, String(sheetIndex)); // 必要なら追加
+                }
+
+            }
+        } catch (err) {
+            console.error(`[DEBUG] Error processing sheet relation file ${relFileName}:`, err);
+        }
+    }
+    // console.log("[DEBUG] sheetDrawingRelMap:", sheetDrawingRelMap);
+
+
+    // 3. 図形ファイルを処理し、正しいシートに紐付ける
+    const fileNames = Object.keys(workbook.files);
+    for (const fileName of fileNames) {
+        const isDrawingXml = /^xl\/drawings\/drawing\d+\.xml$/i.test(fileName);
+        const isVmlDrawing = /^xl\/drawings\/vmlDrawing\d+\.vml$/i.test(fileName);
+
+        if (isDrawingXml || isVmlDrawing) {
+            const fileObj = workbook.files[fileName];
+            if (!fileObj) continue;
+
+            let sheetName = "不明なシート";
+            const baseFileName = fileName.substring(fileName.lastIndexOf('/') + 1); // e.g., "drawing1.xml"
+
+            // drawing.xml の場合は sheetDrawingRelMap を使ってシート名を特定
+            if (isDrawingXml && sheetDrawingRelMap.has(baseFileName)) {
+                const sheetIndexStr = sheetDrawingRelMap.get(baseFileName);
+                if (sheetNameMap.has(sheetIndexStr)) {
+                    sheetName = sheetNameMap.get(sheetIndexStr);
+                    // console.log(`[DEBUG] Mapped ${baseFileName} to sheet: ${sheetName} (Index: ${sheetIndexStr})`);
+                } else {
+                     // console.log(`[DEBUG] Warning: sheetIndex ${sheetIndexStr} from rels not found in sheetNameMap for ${baseFileName}`);
+                }
+            }
+            // vmlDrawing.vml の場合、または drawing.xml が rels になかった場合、
+            // 従来のファイル名からの推測ロジックをフォールバックとして使用
+            else {
+                // console.log(`[DEBUG] Using fallback (filename based) sheet association for ${fileName}`);
+                const drawingMatch = fileName.match(/(?:drawing|vmlDrawing)(\d+)\.(?:xml|vml)$/i);
+                const drawingIndex = drawingMatch ? parseInt(drawingMatch[1], 10) - 1 : -1;
+                if (drawingIndex >= 0 && sheetNameMap.has(String(drawingIndex))) {
+                    sheetName = sheetNameMap.get(String(drawingIndex));
+                    // console.log(`[DEBUG] Fallback association for ${fileName}: Sheet ${sheetName} (Index: ${drawingIndex})`);
+                } else {
+                     // console.log(`[DEBUG] Fallback association failed for ${fileName}`);
+                }
+            }
+
+
+            const xmlString = await getStringFromZipFileAsync(fileObj);
+            // parseShapeXml はシート名引数を内部では使っていないので、fileNameだけでOK
+            const parsedShapes = parseShapeXml(xmlString, fileName); // { row, col, text } の配列を取得
+
+            if (parsedShapes.length > 0) {
+                // console.log(`[DEBUG] Adding ${parsedShapes.length} shapes from ${fileName} to sheet: ${sheetName}`);
+                if (!shapesBySheet.has(sheetName)) {
+                    shapesBySheet.set(sheetName, []);
+                }
+                shapesBySheet.get(sheetName).push(...parsedShapes);
+            }
+        }
+    }
+
+    // 4. 全ての drawing ファイルを処理した後、シートごとにグリッド化してテキストを結合
+    let finalShapeText = "";
+    const sortedSheetIndices = Array.from(sheetNameMap.keys()).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
+    // ソートされたシートインデックス順に処理
+    for (const sheetIndexStr of sortedSheetIndices) {
+        const sheetName = sheetNameMap.get(sheetIndexStr);
+        if (shapesBySheet.has(sheetName)) {
+            const shapes = shapesBySheet.get(sheetName);
+            // 同じシート内で重複するテキストを持つシェイプを除去する（完全に同じテキストを持つシェイプが複数ある場合）
+            // ※位置情報が異なる場合は別物として扱う
+            const uniqueShapes = [];
+            const seenTexts = new Set();
+            shapes.forEach(shape => {
+                // テキストと位置情報で一意性を判断（同一セル内の複数シェイプは別物）
+                const key = `${shape.row}-${shape.col}-${shape.text}`;
+                if (!seenTexts.has(key)) {
+                    uniqueShapes.push(shape);
+                    seenTexts.add(key);
+                } else {
+                     // console.log(`[DEBUG] Duplicate shape text removed: "${shape.text}" at row ${shape.row}, col ${col} on sheet "${sheetName}"`);
+                }
+            });
+
+
+            // グリッドシェイプとその他のシェイプに分類
+            const gridShapes = uniqueShapes.filter(s => s.row !== Infinity && s.col !== Infinity);
+            const otherShapes = uniqueShapes.filter(s => s.row === Infinity || s.col === Infinity); // VMLや位置不明なもの
+
+            let sheetGridText = "";
+            if (gridShapes.length > 0) {
+                // グリッドの最大行・列を計算
+                let maxRow = 0;
+                let maxCol = 0;
+                gridShapes.forEach(s => {
+                    maxRow = Math.max(maxRow, s.row);
+                    maxCol = Math.max(maxCol, s.col);
+                });
+
+                // グリッドを初期化 (二次元配列、中身は文字列)
+                const grid = Array(maxRow + 1).fill(null).map(() => Array(maxCol + 1).fill(""));
+
+                // グリッドにテキストを配置 (同じセルは" "で連結)
+                gridShapes.forEach(s => {
+                    if (grid[s.row] && grid[s.row][s.col] !== undefined) {
+                        grid[s.row][s.col] += (grid[s.row][s.col] ? " " : "") + s.text;
+                    } else {
+                         // 配列範囲外などのエラーを防ぐ（基本的には起こらないはずだが念のため）
+                         console.warn(`[DEBUG] Shape at invalid grid position skipped: row=${s.row}, col=${s.col}, sheet=${sheetName}`);
+                    }
+                });
+
+                sheetGridText += `【Shapes in "${sheetName}"】\n`;
+                // console.log("[DEBUG] Original grid before slimming:", grid); // デバッグ用ログは維持
+
+                // 1. 空列判定
+                const emptyColumnIndices = new Set();
+                for (let c = 0; c <= maxCol; c++) {
+                    let isColEmpty = true;
+                    for (let r = 0; r <= maxRow; r++) {
+                        // grid[r] が存在し、かつ grid[r][c] が空文字でないことを確認
+                        if (grid[r]?.[c] && grid[r][c] !== "") {
+                            isColEmpty = false;
+                            break;
+                        }
+                    }
+                    if (isColEmpty) {
+                        emptyColumnIndices.add(c);
+                    }
+                }
+                // console.log("[DEBUG] Empty column indices:", emptyColumnIndices); // デバッグ用ログは維持
+
+                // 2. グリッドをテキスト化 (空行・空列を削除、行末タブ削除)
+                let gridContent = "";
+                for (let r = 0; r <= maxRow; r++) {
+                    let rowText = "";
+                    let rowHasContent = false; // 行に内容があるかフラグ
+                    let cellsInRow = []; // この行で実際に出力するセルを一時格納
+
+                    for (let c = 0; c <= maxCol; c++) {
+                        // 現在の列が空列でない場合のみ処理
+                        if (!emptyColumnIndices.has(c)) {
+                            const cellContent = grid[r]?.[c] || "";
+                            cellsInRow.push(cellContent); // 空でない列のセル内容を配列に追加
+                            // console.log("[DEBUG] cellContent", cellContent, "r=", r, "c=", c); // デバッグ用ログは維持
+                            if (cellContent) {
+                                 rowHasContent = true; // この行に内容があることを記録
+                            }
+                        }
+                    }
+
+                    // 内容のある行のみ、タブ区切りで結合して結果に追加
+                    if (rowHasContent) {
+                        rowText = cellsInRow.join("\t"); // 空でない列のセルだけをタブで結合
+                        rowText = rowText.replace(/\t+$/, "");
+                        gridContent += rowText + "\n";
+                    }
+                }
+
+                // グリッド全体が空でなければ追加
+                if (gridContent.trim()) {
+                    sheetGridText += gridContent + "\n"; // グリッドの後にも改行
+                } else {
+                    // グリッドは存在したが中身がなかった場合（例えば空テキストの図形のみ、または空行/空列削除の結果）
+                    // sheetGridText += "(No displayable shapes in grid)\n\n"; // ヘッダーのみ表示されるのは冗長なので、ヘッダーごと出力しない
+                    sheetGridText = ""; // グリッドヘッダーも出力しない
+                }
+            }
+
+            // VML/その他図形のテキストをリスト化
+            let otherShapesText = "";
+            if (otherShapes.length > 0) {
+                // VMLなども元の出現順に近いように（不安定だが）ソートを試みる
+                otherShapes.sort((a, b) => {
+                     // もしVML内に順序を示す情報があればそれを使うべきだが、現状は特にないのでそのまま
+                    return 0; // 元の配列順を維持（sortは不安定な場合がある）
+                });
+                otherShapesText += `【Other Shapes (e.g., VML) in "${sheetName}"】\n`;
+                otherShapesText += otherShapes.map(s => s.text).join("\n") + "\n\n";
+            }
+
+            // シートごとのテキストを結合
+            if (sheetGridText || otherShapesText) {
+                 finalShapeText += sheetGridText + otherShapesText;
+            }
+
+        }
+    }
+
+    // "不明なシート" に分類されたものがあれば、同様に処理して最後に追加
+    if (shapesBySheet.has("不明なシート")) {
+        const shapes = shapesBySheet.get("不明なシート");
+        // 重複除去
+        const uniqueShapes = [];
+        const seenTexts = new Set();
+        shapes.forEach(shape => {
+            const key = `${shape.row}-${shape.col}-${shape.text}`;
+            if (!seenTexts.has(key)) {
+                uniqueShapes.push(shape);
+                seenTexts.add(key);
+            } else {
+                 // console.log(`[DEBUG] Duplicate shape text removed: "${shape.text}" at row ${shape.row}, col ${shape.col} on sheet "不明なシート"`);
+            }
+        });
+
+        const gridShapes = uniqueShapes.filter(s => s.row !== Infinity && s.col !== Infinity);
+        const otherShapes = uniqueShapes.filter(s => s.row === Infinity || s.col === Infinity);
+        const sheetName = "不明なシート";
+
+        let sheetGridText = "";
+         if (gridShapes.length > 0) {
+             // グリッド作成
+             let maxRow = 0;
+             let maxCol = 0;
+             gridShapes.forEach(s => {
+                 maxRow = Math.max(maxRow, s.row);
+                 maxCol = Math.max(maxCol, s.col);
+             });
+             const grid = Array(maxRow + 1).fill(null).map(() => Array(maxCol + 1).fill(""));
+             gridShapes.forEach(s => {
+                  if (grid[s.row] && grid[s.row][s.col] !== undefined) {
+                      grid[s.row][s.col] += (grid[s.row][s.col] ? " " : "") + s.text; // 元の改行連結
+                  }
+             });
+
+             sheetGridText += `【Shapes in "${sheetName}"】\n`;
+
+             // 1. 空列判定
+             const emptyColumnIndices = new Set();
+             for (let c = 0; c <= maxCol; c++) {
+                 let isColEmpty = true;
+                 for (let r = 0; r <= maxRow; r++) {
+                     if (grid[r]?.[c] && grid[r][c] !== "") {
+                         isColEmpty = false;
+                         break;
+                     }
+                 }
+                 if (isColEmpty) {
+                     emptyColumnIndices.add(c);
+                 }
+             }
+
+             // 2. グリッドをテキスト化 (空行・空列を削除、行末タブ削除)
+             let gridContent = "";
+             for (let r = 0; r <= maxRow; r++) {
+                 let rowText = "";
+                 let rowHasContent = false;
+                 let cellsInRow = [];
+
+                 for (let c = 0; c <= maxCol; c++) {
+                     if (!emptyColumnIndices.has(c)) {
+                         const cellContent = grid[r]?.[c] || "";
+                         cellsInRow.push(cellContent);
+                         if (cellContent) rowHasContent = true;
+                     }
+                 }
+                 if (rowHasContent) {
+                    rowText = cellsInRow.join("\t");
+                    rowText = rowText.replace(/\t+$/, "");
+                    gridContent += rowText + "\n";
+                 }
+             }
+
+             if (gridContent.trim()) {
+                sheetGridText += gridContent + "\n";
+             } else {
+                 // sheetGridText += "(No displayable shapes in grid)\n\n";
+                 sheetGridText = ""; // ヘッダーごと出力しない
+             }
+        }
+
+        // その他図形のテキスト化
+        let otherShapesText = "";
+         if (otherShapes.length > 0) {
+             otherShapes.sort((a, b) => 0);
+             otherShapesText += `【Other Shapes (e.g., VML) in "${sheetName}"】\n`;
+             otherShapesText += otherShapes.map(s => s.text).join("\n") + "\n\n";
+        }
+
+         // テキスト結合
+         if (sheetGridText || otherShapesText) {
+            finalShapeText += sheetGridText + otherShapesText;
+         }
+    }
+
+    return finalShapeText;
+}
+
+
 
 // ▼▼▼ 3-3. Excel ファイル読み込みを async 化し、図形内テキストも抽出 ▼▼▼
 // ★★★ 改良：空行・空列削除、セル内整形処理を追加 ★★★
@@ -297,7 +748,7 @@ async function readExcelFile(file) {
         // console.log("[DEBUG] About to XLSX.read (async) ...", file.name);
         const workbook = XLSX.read(data, {
             type: 'array',
-            cellComments: true,
+            cellComments: true, // メモ（旧コメント）取得に必要
             bookFiles: true
         });
         // console.log("[DEBUG] XLSX.read complete:", file.name);
@@ -307,7 +758,6 @@ async function readExcelFile(file) {
             // console.log("[DEBUG] Processing sheet:", sheetName);
             const sheet = workbook.Sheets[sheetName];
 
-            // ★★★ ここから改良 ★★★
             // 1. シートを2次元配列に変換 (空セルは "" とする)
             const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
@@ -382,29 +832,53 @@ async function readExcelFile(file) {
                  // シートが完全に空になった場合 (元のデータが空 or 空行/空列削除の結果)
                  text += `【Sheet: ${sheetName}】\n(シートは空、または有効なデータがありません)\n\n\n`;
             }
-            // ★★★ 改良ここまで ★★★
 
 
-            // シート内のコメントも出力する (既存のコードは変更しない)
-            if (sheet["!comments"] && sheet["!comments"].length > 0) {
-                // console.log("[DEBUG] Found comments in sheet:", sheetName);
+            // シート内のコメントも出力する
+            // ★★★ コメントテキストのサニタイズ処理を追加 ★★★
+            // ★★★ デバッグログ追加：コメント情報の確認 ★★★
+            console.log(`[DEBUG] Checking comments for sheet: ${sheetName}`);
+            console.log("[DEBUG] sheet['!comments'] object:", sheet["!comments"]); // オブジェクト自体をログ出力
+            // ★★★ デバッグログ追加ここまで ★★★
+
+            if (sheet["!comments"] && Array.isArray(sheet["!comments"]) && sheet["!comments"].length > 0) {
+                 // console.log("[DEBUG] Found comments data in sheet:", sheetName, sheet["!comments"].length); // 元のログも維持
                 text += `【Comments in ${sheetName}】\n`;
                 sheet["!comments"].forEach(comment => {
+                    // ★★★ デバッグログ追加：個々のコメント内容確認 ★★★
+                    console.log("[DEBUG] Processing comment object:", comment);
+                    // ★★★ デバッグログ追加ここまで ★★★
+
                     const author = comment.a || "unknown";
-                    // コメントテキストも整形処理を適用するか？ -> 指示にはないので、元のままにしておく
-                    const commentText = comment.t || "";
-                    text += `Cell ${comment.ref} (by ${author}): ${commentText}\n`;
+                    const originalCommentText = comment.t || ""; // コメントテキストを取得
+
+                    // 1. 改行・タブをスペースに置換
+                    let cleanedCommentText = originalCommentText.replace(/[\n\t]+/g, ' ');
+                    // 2. 連続する空白を1つに正規化
+                    cleanedCommentText = cleanedCommentText.replace(/\s{2,}/g, ' ');
+                    // 3. 前後の空白を削除
+                    cleanedCommentText = cleanedCommentText.trim();
+
+                    if (cleanedCommentText) { // サニタイズ後のテキストが空でなければ出力
+                        const cellRef = comment.ref || "unknown cell"; // セル参照も取得
+                        text += `Cell ${cellRef} (by ${author}): ${cleanedCommentText}\n`;
+                    } else {
+                        console.log(`[DEBUG] Comment text was empty after cleaning for cell ${comment.ref}`); // 空になった場合のログ
+                    }
                 });
                 text += "\n";
+            } else {
+                 // コメントが見つからなかった場合のログ
+                 console.log(`[DEBUG] No comments data found or sheet["!comments"] is not a non-empty array for sheet: ${sheetName}`);
             }
         });
 
-        // 図形(Shapes)の中のテキストを取得（非同期） (既存のコードは変更しない)
+        // 図形(Shapes)の中のテキストを取得（非同期）
         const shapeText = await extractShapeTextFromWorkbookAsync(workbook);
         if (shapeText.trim()) {
             // console.log("[DEBUG] shapeText extracted length:", shapeText.length);
-             // 図形テキストの整形処理は別途検討が必要だが、指示にはないので元のまま
-            text += `【Shapes Overall】\n${shapeText}\n`;
+             // 図形テキストは extractShapeTextFromWorkbookAsync -> parseShapeXml でサニタイズ済み
+            text += `${shapeText}\n`;
         } else {
             // console.log("[DEBUG] No shapeText extracted.");
         }
