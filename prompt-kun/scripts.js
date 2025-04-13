@@ -755,18 +755,21 @@ function resolvePath(basePath, relativePath) {
 
 
 // ▼▼▼ 3-3. Excel ファイル読み込みを async 化し、図形内テキストも抽出 ▼▼▼
-// ★★★ 改良：空行・空列削除、セル内整形処理を追加 ★★★
+// ★★★ 改良：空行・空列削除、セル内整形処理、日付フォーマット適用を追加 ★★★
 async function readExcelFile(file) {
     // console.log("[DEBUG] readExcelFile called (async):", file.name);
-    const data = new Uint8Array(await file.arrayBuffer());  // FileReader不要でも読み込めるが、従来通りでもOK
+    const data = new Uint8Array(await file.arrayBuffer());
     try {
-        // コメント取得のため cellComments: true を指定
-        // 図形内文言も取得するため bookFiles: true を指定
+        // ★★★ 修正点 1: オプションに cellNF: true, cellDates: true を追加 ★★★
+        // cellNF: true -> セルの数値書式(zプロパティ)を読み込む
+        // cellDates: true -> 日付をDateオブジェクトとして読み込む (cellNFと併用)
         // console.log("[DEBUG] About to XLSX.read (async) ...", file.name);
         const workbook = XLSX.read(data, {
             type: 'array',
-            cellComments: true, // メモ（旧コメント）取得に必要
-            bookFiles: true
+            cellComments: true, // メモ取得
+            bookFiles: true,    // 図形抽出用
+            cellNF: true,       // 数値書式を読み込む
+            cellDates: true     // 日付をDateオブジェクトとして読み込む
         });
         // console.log("[DEBUG] XLSX.read complete:", file.name);
 
@@ -774,42 +777,67 @@ async function readExcelFile(file) {
         workbook.SheetNames.forEach(sheetName => {
             // console.log("[DEBUG] Processing sheet:", sheetName);
             const sheet = workbook.Sheets[sheetName];
+            const sheetRef = sheet['!ref']; // シートの範囲 (例: "A1:C10")
+            let jsonData = []; // フォーマット適用後のデータを格納する配列
 
-            // 1. シートを2次元配列に変換 (空セルは "" とする)
-            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            // ★★★ 修正点 2: sheet_to_json の代わりにセルを個別に処理 ★★★
+            if (sheetRef) {
+                const range = XLSX.utils.decode_range(sheetRef);
+                // jsonData を適切なサイズで初期化 (空文字列で埋める)
+                jsonData = Array(range.e.r + 1).fill(null).map(() => Array(range.e.c + 1).fill(""));
 
-            // 2. セル内容の前処理 & 空行削除
-            const processedData = jsonData.map(row => {
-                return row.map(cell => {
-                    // セルの型チェックと前処理
-                    let cellValue = cell;
-                    if (cellValue === null || cellValue === undefined) {
-                        cellValue = ""; // nullやundefinedは空文字列に
-                    } else {
-                        cellValue = String(cellValue); // 文字列に変換
+                for (let R = range.s.r; R <= range.e.r; ++R) {
+                    for (let C = range.s.c; C <= range.e.c; ++C) {
+                        const cellAddress = { c: C, r: R };
+                        const cellRef = XLSX.utils.encode_cell(cellAddress);
+                        const cell = sheet[cellRef];
+
+                        let cellValue = ""; // デフォルトは空文字列
+                        if (cell && cell.v !== undefined) { // セルとその値が存在する場合
+                            // cell.w は書式適用済みのテキスト (優先的に使用)
+                            // cell.w がない場合、format_cell で書式を適用
+                            // format_cell は cellDates:true で読み込んだ日付オブジェクトも適切に処理する
+                            cellValue = cell.w || XLSX.utils.format_cell(cell);
+                        }
+
+                        // セル内容の前処理 (改行、タブ、連続空白の除去)
+                        if (cellValue === null || cellValue === undefined) {
+                             cellValue = "";
+                         } else {
+                             cellValue = String(cellValue); // 文字列に変換
+                         }
+                        let cleanedCell = cellValue.replace(/[\n\t]+/g, ' ');
+                        cleanedCell = cleanedCell.replace(/\s{2,}/g, ' ');
+                        cleanedCell = cleanedCell.trim();
+
+                        // ★★★ jsonData の対応する位置に格納 ★★★
+                        if (jsonData[R] === undefined) jsonData[R] = []; // 行が存在しない場合初期化(念のため)
+                        jsonData[R][C] = cleanedCell;
                     }
+                }
+                // jsonData の先頭の空行を削除 (SheetJSの範囲は0行目から始まるため)
+                // jsonData = jsonData.slice(range.s.r); // A1から始まらないシートの場合、これでいいか要検討 → 下の空行削除で対応
 
-                    // 改行とタブをスペースに置換
-                    let cleanedCell = cellValue.replace(/[\n\t]+/g, ' ');
-                    // 連続する空白を1つに正規化
-                    cleanedCell = cleanedCell.replace(/\s{2,}/g, ' ');
-                    // 前後の空白を削除
-                    cleanedCell = cleanedCell.trim();
-                    // 結果が空白のみの場合は空文字列にする
-                    return cleanedCell;
-                });
-            }).filter(row => row.some(cell => cell !== "")); // 実質的に空でない行のみを残す
+            } else {
+                // シートが空か、'!ref'がない場合
+                 jsonData = []; // 空のデータとして扱う
+            }
+
+            // ★★★ 修正点 3: 空行削除のロジックを調整 ★★★
+            // jsonData は既にフォーマット済みテキストの2次元配列になっている
+            const processedData = jsonData.filter(row => row && row.some(cell => cell !== "")); // 実質的に空でない行のみを残す
+
+            // --- ここから下の空列削除、TSV化、コメント処理、図形処理は変更なし ---
 
             // 3. 空列削除
             let finalData = [];
             if (processedData.length > 0) {
-                const numCols = Math.max(...processedData.map(row => row.length)); // 最大列数を取得
+                const numCols = Math.max(0, ...processedData.map(row => row ? row.length : 0)); // 最大列数を取得 (空配列の場合も考慮)
                 const colsToRemove = new Set();
 
                 for (let j = 0; j < numCols; j++) {
                     let isColEmpty = true;
                     for (let i = 0; i < processedData.length; i++) {
-                        // processedData[i][j] が範囲外 or 空文字列でないかチェック
                         if (processedData[i] && processedData[i][j] !== undefined && processedData[i][j] !== "") {
                             isColEmpty = false;
                             break;
@@ -823,78 +851,65 @@ async function readExcelFile(file) {
                 // 空でない列だけを含む新しいデータを作成
                 finalData = processedData.map(row => {
                     const newRow = [];
+                    if (!row) return newRow; // 行自体がない場合は空行
                     const originalLength = row.length;
-                    for (let j = 0; j < numCols; j++) { // 最大列数までループ
+                    for (let j = 0; j < numCols; j++) {
                         if (!colsToRemove.has(j)) {
-                            // 元の行にその列が存在すれば値を追加、なければ空文字列
                             newRow.push(j < originalLength && row[j] !== undefined ? row[j] : "");
                         }
                     }
                     return newRow;
                 });
 
-                // 再度、空行が発生していないかチェック (空列削除の結果、行が空になる場合があるため)
-                finalData = finalData.filter(row => row.some(cell => cell !== ""));
+                // 再度、空行が発生していないかチェック
+                finalData = finalData.filter(row => row && row.some(cell => cell !== ""));
             }
+
 
             // 4. 最終的なデータをTSV化
             if (finalData.length > 0) {
-                const newSheet = XLSX.utils.aoa_to_sheet(finalData);
-                let tsv = XLSX.utils.sheet_to_csv(newSheet, { FS: '\t' });
+                // ★★★ 修正点 4: aoa_to_sheet と sheet_to_csv の代わりに手動でTSV化 ★★★
+                let tsv = finalData.map(row => row.join('\t')).join('\n');
+                // 行末のタブは join で発生しないはずだが、念のため残しておく
                 const lines = tsv.split('\n');
-                const trimmedLines = lines.map(line => line.replace(/\t+$/, '')); // 正規表現で末尾の連続するタブを削除
+                const trimmedLines = lines.map(line => line.replace(/\t+$/, ''));
                 tsv = trimmedLines.join('\n');
                 text += `【Sheet: ${sheetName}】\n${tsv}\n\n\n`;
             } else {
-                 // シートが完全に空になった場合 (元のデータが空 or 空行/空列削除の結果)
                  text += `【Sheet: ${sheetName}】\n(シートは空、または有効なデータがありません)\n\n\n`;
             }
 
-
-            // シート内のコメントも出力する
-            // ★★★ コメントテキストのサニタイズ処理を追加 ★★★
-            // ★★★ デバッグログ追加：コメント情報の確認 ★★★
+            // シート内のコメントも出力する (変更なし)
             console.log(`[DEBUG] Checking comments for sheet: ${sheetName}`);
-            console.log("[DEBUG] sheet['!comments'] object:", sheet["!comments"]); // オブジェクト自体をログ出力
-            // ★★★ デバッグログ追加ここまで ★★★
+            console.log("[DEBUG] sheet['!comments'] object:", sheet["!comments"]);
 
             if (sheet["!comments"] && Array.isArray(sheet["!comments"]) && sheet["!comments"].length > 0) {
-                 // console.log("[DEBUG] Found comments data in sheet:", sheetName, sheet["!comments"].length); // 元のログも維持
+                console.log("[DEBUG] Found comments data in sheet:", sheetName, sheet["!comments"].length);
                 text += `【Comments in ${sheetName}】\n`;
                 sheet["!comments"].forEach(comment => {
-                    // ★★★ デバッグログ追加：個々のコメント内容確認 ★★★
                     console.log("[DEBUG] Processing comment object:", comment);
-                    // ★★★ デバッグログ追加ここまで ★★★
-
                     const author = comment.a || "unknown";
-                    const originalCommentText = comment.t || ""; // コメントテキストを取得
-
-                    // 1. 改行・タブをスペースに置換
+                    const originalCommentText = comment.t || "";
                     let cleanedCommentText = originalCommentText.replace(/[\n\t]+/g, ' ');
-                    // 2. 連続する空白を1つに正規化
                     cleanedCommentText = cleanedCommentText.replace(/\s{2,}/g, ' ');
-                    // 3. 前後の空白を削除
                     cleanedCommentText = cleanedCommentText.trim();
-
-                    if (cleanedCommentText) { // サニタイズ後のテキストが空でなければ出力
-                        const cellRef = comment.ref || "unknown cell"; // セル参照も取得
+                    if (cleanedCommentText) {
+                        const cellRef = comment.ref || "unknown cell";
                         text += `Cell ${cellRef} (by ${author}): ${cleanedCommentText}\n`;
                     } else {
-                        console.log(`[DEBUG] Comment text was empty after cleaning for cell ${comment.ref}`); // 空になった場合のログ
+                        console.log(`[DEBUG] Comment text was empty after cleaning for cell ${comment.ref}`);
                     }
                 });
                 text += "\n";
             } else {
-                 // コメントが見つからなかった場合のログ
-                 console.log(`[DEBUG] No comments data found or sheet["!comments"] is not a non-empty array for sheet: ${sheetName}`);
+                console.log(`[DEBUG] No comments data found or sheet["!comments"] is not a non-empty array for sheet: ${sheetName}`);
             }
         });
 
-        // 図形(Shapes)の中のテキストを取得（非同期）
+        // 図形(Shapes)の中のテキストを取得（非同期）(変更なし)
         const shapeText = await extractShapeTextFromWorkbookAsync(workbook);
         if (shapeText.trim()) {
             // console.log("[DEBUG] shapeText extracted length:", shapeText.length);
-             // 図形テキストは extractShapeTextFromWorkbookAsync -> parseShapeXml でサニタイズ済み
             text += `${shapeText}\n`;
         } else {
             // console.log("[DEBUG] No shapeText extracted.");
