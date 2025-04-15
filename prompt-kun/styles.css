@@ -1,49 +1,325 @@
-body {
-    font-family: Arial, sans-serif;
-    display: flex;
-    justify-content: space-between;
-    padding: 20px;
-    margin-top: 40px;
-    background-color: #e6f3e6;
-    color: #2e4a2e;
+/* プロンプトくん - シンプルエコフレンドリースタイル */
+:root {
+  --primary-color: #4CAF50;
+  --primary-hover: #388E3C;
+  --secondary-color: #E8F5E9;
+  --accent-color: #81C784;
+  --text-color: #263238;
+  --light-text: #607D8B;
+  --border-color: #C8E6C9;
+  --bg-color: #F8FAF8;
+  --panel-bg-color: #EFF7F0;  /* New softer panel background color */
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --radius: 8px;
+  --transition: all 0.2s ease;
 }
+
+body {
+  font-family: 'Segoe UI', 'Meiryo UI', system-ui, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  line-height: 1.6;
+  margin: 0;
+  padding: 20px;
+}
+
+.container-fluid {
+  max-width: 1400px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* さりげない地球アイコン */
+.container-fluid::before {
+  content: "";
+  position: absolute;
+  top: -15px;
+  right: 15px;
+  width: 24px;
+  height: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234CAF50' opacity='0.6'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+  opacity: 0.7;
+}
+
+.d-flex {
+  display: flex;
+  gap: 20px;
+}
+
 #file-content,
 #file-list {
-    width: 45%;
-    margin-right: 10px;
+  background-color: var(--panel-bg-color);  /* Changed from white to softer color */
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  flex: 1;
+  position: relative;
 }
+
+/* グリーンアクセントライン */
+#file-content::before,
+#file-list::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(to right, var(--primary-color), var(--accent-color));
+}
+
+label {
+  color: var(--text-color);
+  margin-bottom: 6px;
+  display: block;
+  font-weight: 600;
+}
+
+textarea.form-control {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 12px;
+  width: 100%;
+  transition: var(--transition);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  margin-bottom: 16px;
+  background-color: var(--bg-color);  /* Softer background for textarea */
+}
+
+textarea.form-control:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(129, 199, 132, 0.2);
+  outline: none;
+}
+
 #drop-zone {
-    border: 2px dashed #4a724a;
-    padding: 20px;
-    text-align: center;
-    background-color: #ffffff;
+  border: 2px dashed var(--accent-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+  background-color: var(--secondary-color);
+  transition: var(--transition);
+  margin: 16px 0;
+  color: var(--light-text);
+  position: relative;
 }
-.file-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 5px;
-    border-bottom: 1px solid #b8d8b8;
+
+/* 葉っぱアイコンに修正 */
+#drop-zone::before {
+  content: "";
+  display: block;
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 10px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2381C784' opacity='0.8'%3E%3Cpath d='M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
 }
-.delete-btn:hover {
-    cursor: pointer;
-    color: #4a724a;
+
+#drop-zone:hover {
+  background-color: #e0f2e0;
+  border-color: var(--primary-color);
 }
+
 .btn {
-    background-color: #a8c8a8;
-    color: #2e4a2e;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
 }
-.btn:hover {
-    background-color: #90b090;
+
+.btn-primary {
+  background-color: var(--primary-color);
+  color: white;
+  position: relative;
+  padding-left: 36px;
 }
+
+.btn-primary::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M6.05 8.05c-2.73 2.73-2.73 7.17 0 9.9C7.42 19.34 9.21 20 11 20s3.58-.66 4.95-2.05c2.73-2.73 2.73-7.17 0-9.9C13.22 5.32 8.78 5.32 6.05 8.05zm1.41 1.41c1.95-1.95 5.12-1.95 7.07 0 1.95 1.95 1.95 5.12 0 7.07-1.95 1.95-5.12 1.95-7.07 0-1.95-1.95-1.95-5.12 0-7.07z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary {
+  background-color: #E0E0E0;
+  color: var(--text-color);
+  position: relative;
+  padding-left: 36px;
+}
+
+.btn-secondary::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23607D8B'%3E%3Cpath d='M6.05 8.05c-2.73 2.73-2.73 7.17 0 9.9C7.42 19.34 9.21 20 11 20s3.58-.66 4.95-2.05c2.73-2.73 2.73-7.17 0-9.9C13.22 5.32 8.78 5.32 6.05 8.05zm1.41 1.41c1.95-1.95 5.12-1.95 7.07 0 1.95 1.95 1.95 5.12 0 7.07-1.95 1.95-5.12 1.95-7.07 0-1.95-1.95-1.95-5.12 0-7.07z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.btn-secondary:hover {
+  background-color: #D0D0D0;
+}
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  transition: var(--transition);
+}
+
+.file-item:hover {
+  background-color: var(--secondary-color);
+}
+
+.delete-btn {
+  color: var(--light-text);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.delete-btn:hover {
+  color: #EF5350;
+}
+
+.custom-file {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.custom-file-input {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.custom-file-label {
+  padding: 8px 16px 8px 40px;
+  background-color: var(--panel-bg-color);  /* Changed from white to softer color */
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  color: var(--light-text);
+  cursor: pointer;
+  transition: var(--transition);
+  display: block;
+  text-align: left;
+  position: relative;
+}
+
+.custom-file-label::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2381C784'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.custom-file-input:hover + .custom-file-label {
+  border-color: var(--accent-color);
+  color: var(--primary-color);
+}
+
+#file-list-container {
+  max-height: 500px;
+  overflow-y: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  margin-top: 16px;
+  background-color: var(--bg-color);  /* Softer background */
+}
+
+.alert {
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+}
+
+.alert-danger {
+  background-color: rgba(239, 83, 80, 0.1);
+  color: #D32F2F;
+  border-left: 3px solid #EF5350;
+}
+
+.alert-warning {
+  background-color: rgba(255, 183, 77, 0.1);
+  color: #F57C00;
+  border-left: 3px solid #FFB74D;
+}
+
+/* スクロールバーのカスタマイズ */
 ::-webkit-scrollbar {
-    width: 8px;
+  width: 6px;
 }
+
 ::-webkit-scrollbar-track {
-    background: #e6f3e6;
+  background: var(--secondary-color);
+  border-radius: 10px;
 }
+
 ::-webkit-scrollbar-thumb {
-    background: #90b090;
+  background: var(--accent-color);
+  border-radius: 10px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-    background: #4a724a;
+  background: var(--primary-color);
+}
+
+#selected-file {
+  padding: 8px 12px;
+  background-color: var(--secondary-color);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+#description {
+  background-color: rgba(200, 230, 201, 0.3);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .d-flex {
+    flex-direction: column;
+  }
+  
+  #file-content, 
+  #file-list {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: 20px;
+  }
 }
