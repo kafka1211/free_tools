@@ -1493,7 +1493,7 @@ function copyText(text) {
             // 送信したい情報を任意に記載
             XXXXXXXXXX: "XXXXXXXXXX"
         };
-        //sendOperationLog(logData);
+        // sendOperationLog(logData);
     } catch (err) {
         console.error("[DEBUG] failed to prepare/send operation log:", err);
     }
