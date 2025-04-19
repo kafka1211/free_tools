@@ -1,4 +1,4 @@
-# プロンプトくん ver 2.01
+# プロンプトくん ver 2.2
 
 「**プロンプトくん**」は、テキストファイルをはじめ、Excel・Word・PDF・PowerPoint などのドキュメントをドラッグ＆ドロップで読み込み、抽出したテキストとともに指定のプロンプトをクリップボードにコピーするための HTML/JavaScript アプリケーションです。  
 コピー後は、対話型AI サイト（デフォルトでは [https://XXXXXXXXXX/](https://XXXXXXXXXX/) ）が自動的に起動し、すぐにプロンプトとドキュメント内容を連携できます。
@@ -24,6 +24,7 @@
    - **Excel / Word / PowerPoint 内の図形テキスト** や **Excel のコメント**, **Word / PowerPoint のノートや段落構造**, **PDF のレイアウト保持** なども、なるべく取得できるようになっています。
    - **[Ver 1.8]** Excel抽出時に、空の行・列の削除やセル内テキストの整形機能を追加しました。
    - **[Ver 2.00]** Excelファイルから図形オブジェクト内のテキストを抽出する際に、その配置情報も可能な限り再現する機能を追加しました。
+   - **[Ver 2.2]** 利用状況把握のため、操作ログ（プロンプトテンプレートファイル名、添付ファイル名リスト、日時、環境情報など）を外部サーバーに送信する機能を追加しました（**デフォルトでは無効化されています**）。個人情報は含まれません。**この機能は `scripts.js` 内の `sendOperationLog` 関数で実装されており、ログ送信処理は `copyText` 関数内から呼び出されます。ログの有効化、送信内容、送信先の変更方法は、「カスタマイズ方法」を参照してください。**
 
 3. **styles.css**  
    - 全体の配色やレイアウトなど、見た目を調整するための CSS。  
@@ -89,6 +90,9 @@
 - **簡易テンプレート読み込み**  
   - 右側の「フォルダを選択」からプロンプトテンプレートの集まるフォルダを指定すると一覧が表示され、ファイルをクリックするだけでテキスト領域に流し込めます。  
   - テンプレートファイルを `★★★★★` 区切りで作成すれば、プロンプト・説明・必要ドキュメントリストの 3 つの欄に自動反映されます。
+
+- **操作ログ送信（オプション）**
+  - 利用状況の統計のため、一部の操作情報（使用したプロンプトテンプレートファイル名、添付したファイル名リスト、日時、ブラウザ情報など個人を特定しない情報）を外部サーバーへ送信する機能があります（デフォルト無効）。
 
 ---
 
@@ -187,6 +191,56 @@ HTML 内部で、以下の外部ライブラリ（CDN）を使用しています
          { before: "Foo", after: "Bar" }
      ];
      ```
+
+7. **操作ログ送信の有効化/無効化**
+   - 利用状況の把握を目的とした操作ログの送信機能（デフォルトでは無効）を有効にしたい場合は、`scripts.js` ファイル内の `copyText` 関数にある以下の行を探し、行頭の `//` を削除してコメントアウトを解除してください。
+     ```js
+     // sendOperationLog(logData);
+     ```
+     コメントアウトを解除すると以下のようになります:
+     ```js
+     sendOperationLog(logData);
+     ```
+   - 逆に、送信を無効化したい場合は、行頭に `//` を追加してコメントアウトします。
+
+8. **操作ログの内容を変更する**
+   - 操作ログとして送信される内容は、`scripts.js` ファイル内の `copyText` 関数で定義されている `logData` オブジェクトによって決まります。
+     ```js
+     const logData = {
+         sending_side: "prompt-kun",
+         prompt_file: document.getElementById("selected-file").textContent || "",
+         attached_files: Array.from(
+             document.querySelectorAll("#dropped-files .file-item")
+         ).map(el => (el.file ? el.file.name : el.textContent)),
+         datetime: new Date().toISOString(),
+         machine_name: navigator.userAgent,
+         // 送信したい情報を任意に記載
+         XXXXXXXXXX: "XXXXXXXXXX"
+     };
+     ```
+   - このオブジェクトのキー（例: `sending_side`）や値（例: `"prompt-kun"`）を追加、削除、変更することで、送信されるログの内容をカスタマイズできます。
+   - 例えば、`machine_name` (ユーザーエージェント情報) を送信したくない場合は、該当する行を削除またはコメントアウトします。
+
+9. **操作ログの送信先を変更する**
+   - 操作ログの送信先URLと認証情報は、`scripts.js` ファイル内の `sendOperationLog` 関数で定義されています。
+     ```js
+     function sendOperationLog(logData) {
+         // console.log("[DEBUG] sendOperationLog called. data=", logData);
+         fetch("https://XXXXXXXXXX", { // ← 送信先URL
+             method: "POST",
+             headers: {
+                 "Content-Type": "application/json",
+                 "x-api-key": "XXXXXXXXXX" // ← 認証用APIキー
+             },
+             body: JSON.stringify(logData),
+             keepalive: true
+         }).catch(err => {
+             console.error("[DEBUG] sendOperationLog error:", err);
+         });
+     }
+     ```
+   - `fetch` 関数の第一引数 `"https://..."` を変更することで、ログの送信先URLを変更できます。
+   - `headers` 内の `"x-api-key"` の値を変更することで、送信先サーバーで必要となる認証キーを変更できます。（送信先サーバーの仕様に合わせて、ヘッダー名や認証方式の変更が必要な場合もあります）
 
 ---
 

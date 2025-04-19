@@ -1,3 +1,21 @@
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加箇所 1  :  操作ログ送信用ユーティリティ関数  ★★
+    ………………………………………………………………………………………………………………………… */
+function sendOperationLog(logData) {
+    // console.log("[DEBUG] sendOperationLog called. data=", logData);
+    fetch("https://XXXXXXXXXX", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json",
+            "x-api-key": "XXXXXXXXXX"
+        },
+        body: JSON.stringify(logData),
+        keepalive: true           // ページ遷移直前でも投げ切れるように
+    }).catch(err => {
+        console.error("[DEBUG] sendOperationLog error:", err);
+    });
+}
+
 function listFiles(event) {
     // console.log("[DEBUG] listFiles called.");
     const files = event.target.files;
@@ -1434,7 +1452,7 @@ function copyToClipboard() {
     }
 }
 
-// ▼▼▼ copyText: テキストをクリップボードにコピーし、Chat AI を開く ▼▼▼
+// ▼▼▼ copyText: テキストをクリップボードにコピーし、Chat AI を開く ▼▼▼ */
 function copyText(text) {
     // 生成されるプロンプトの冒頭に「今日の日付:YYYY/MM/DD」を出力する
     //const now = new Date();
@@ -1459,6 +1477,27 @@ function copyText(text) {
         finalText = finalText.split(before).join(after);
     }
     // ▲▲▲ 置換処理ここまで ▲▲▲
+
+    /* ------------------------------------------------------------------
+       ★★ 追加箇所 2 :  操作ログ収集 & 送信
+       ------------------------------------------------------------------ */
+    try {
+        const logData = {
+            sending_side: "prompt-kun",
+            prompt_file: document.getElementById("selected-file").textContent || "",
+            attached_files: Array.from(
+                document.querySelectorAll("#dropped-files .file-item")
+            ).map(el => (el.file ? el.file.name : el.textContent)),
+            datetime: new Date().toISOString(),
+            machine_name: navigator.userAgent,
+            // 送信したい情報を任意に記載
+            XXXXXXXXXX: "XXXXXXXXXX"
+        };
+        //sendOperationLog(logData);
+    } catch (err) {
+        console.error("[DEBUG] failed to prepare/send operation log:", err);
+    }
+    /* ------------------------------------------------------------------ */
 
     // console.log("[DEBUG] copyText called. Final text length:", finalText.length);
     navigator.clipboard.writeText(finalText).then(
