@@ -29,9 +29,6 @@
                     <label for="input-files" class="font-weight-bold">
                         必要なドキュメント (テキスト / Excel / Word / PDF / PowerPoint): <br>
                     </label>
-                    <div class="alert alert-danger" role="alert">
-                        <small>※Excelファイル内の全シートを対象に、文字情報は配置位置を考慮してテキスト化します。図形オブジェクト内の文字情報も取得し、可能な限り配置も再現します。ただし、図形オブジェクト間のつながり（矢印など）は取得できません。また、空の列と行は削除してテキストサイズを小さくします。</small>
-                    </div>
 
                     <div id="input-files" class="p-2 small"></div>
 
@@ -50,6 +47,10 @@
                     クリップボードにコピー ＋ AIに連携
                 </button>
                 <button onclick="clearAll()" class="btn btn-secondary">クリア</button>
+                <div></div>
+                <div class="alert alert-danger" role="alert">
+                    <small>※Excelファイル内の全シートを対象に、文字情報は配置位置を考慮してテキスト化します。図形オブジェクト内の文字情報も取得し、可能な限り配置も再現します。ただし、図形オブジェクト間のつながり（矢印など）は取得できません。また、空の列と行は削除してテキストサイズを小さくします。</small>
+                </div>
             </div>
             <div id="file-list" class="p-3 border flex-fill">
                 <p>プロンプトテンプレート指定:</p>

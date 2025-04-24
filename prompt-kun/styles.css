@@ -261,7 +261,8 @@ textarea.form-control:focus {
 .alert {
   border-radius: var(--radius);
   padding: 12px;
-  margin-bottom: 16px;
+  margin-top: 16px;
+  margin-bottom: 8px;
   font-size: 0.875rem;
 }
 
