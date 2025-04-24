@@ -1491,7 +1491,7 @@ function copyText(text) {
             datetime: new Date().toISOString(),
             machine_name: navigator.userAgent,
             // 送信したい情報を任意に記載
-            XXXXXXXXXX: "XXXXXXXXXX"
+            memo: "XXXXXXXXXX"
         };
         // sendOperationLog(logData);
     } catch (err) {
