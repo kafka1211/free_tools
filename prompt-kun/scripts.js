@@ -557,8 +557,9 @@ function extractStructure(xmlDoc, drawingPath) {
     
     /* ===== 7. 最終フィルタリング ======================================= */
     const finalNodes = nodes.filter(n =>
-        (n.type === "group" || true) &&
-        !(!n.hasText && !connectedNodeIds.has(n.id))
+        //(n.type === "group" || true) &&
+        //!(!n.hasText && !connectedNodeIds.has(n.id))
+        true
     );
     const finalEdges = edges.filter(e =>
         (true)
