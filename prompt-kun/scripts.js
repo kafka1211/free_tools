@@ -1,4 +1,695 @@
 /*  …………………………………………………………………………………………………………………………
+    ★★ 追加箇所 0  :  Excel 図形抽出用グローバル定義とダミーロガー  ★★
+    ………………………………………………………………………………………………………………………… */
+
+/*  ▼ 既に定義済みであれば再宣言を避けるため typeof チェックを入れる */
+/* ---------- Excel 図形プリセット白リスト ---------- */
+if (typeof window.TARGET_SHAPE_PRESETS === "undefined") {
+    window.TARGET_SHAPE_PRESETS = new Set([
+        "rect", "roundRect", "ellipse", "diamond", "parallelogram", "triangle",
+        "hexagon", "octagon", "flowChartProcess", "flowChartAlternateProcess",
+        "flowChartDecision", "flowChartInputOutput", "flowChartPredefinedProcess",
+        "flowChartInternalStorage", "flowChartDocument", "flowChartMultidocument",
+        "flowChartTerminator", "flowChartPreparation", "flowChartManualInput",
+        "flowChartManualOperation", "flowChartConnector", "flowChartOffpageConnector",
+        "flowChartCard", "flowChartPunchedTape", "flowChartSummingJunction", "flowChartOr",
+        "flowChartCollate", "flowChartSort", "flowChartExtract", "flowChartMerge",
+        "flowChartStoredData", "flowChartDelay", "flowChartSequentialAccessStorage",
+        "flowChartMagneticDisk", "flowChartDirectAccessStorage", "flowChartDisplay",
+        "flowChartOnlineStorage",
+        "line", "lineInv", "bentConnector2", "bentConnector3", "bentConnector4",
+        "bentConnector5", "curvedConnector2", "curvedConnector3", "curvedConnector4",
+        "curvedConnector5", "straightConnector1", "openRect",
+        "custom"
+    ]);
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: 近傍自動コネクト用しきい値 (ユークリッド) ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.NEAR_SHAPE_THRESHOLD === "undefined") {
+    /* 2以内なら自動で接続 – 必要に応じて変更可 */
+    window.NEAR_SHAPE_THRESHOLD = 2;
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: EMU → セル座標変換用定数 ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.EMU_PER_POINT === "undefined") {
+    window.EMU_PER_POINT = 12700;               /* 1pt = 12 700 EMU */
+}
+if (typeof window.DEFAULT_ROW_HEIGHT_PT === "undefined") {
+    window.DEFAULT_ROW_HEIGHT_PT = 15;          /* 既定行高 (pt)   */
+}
+if (typeof window.DEFAULT_ROW_HEIGHT_EMU === "undefined") {
+    window.DEFAULT_ROW_HEIGHT_EMU = window.EMU_PER_POINT * window.DEFAULT_ROW_HEIGHT_PT; /* 190 500 EMU */
+}
+if (typeof window.EMU_PER_PIXEL === "undefined") {
+    window.EMU_PER_PIXEL = 9525;                /* 1px = 9 525 EMU */
+}
+if (typeof window.DEFAULT_COL_WIDTH_PX === "undefined") {
+    window.DEFAULT_COL_WIDTH_PX = 64;           /* 既定列幅 (px)   */
+}
+if (typeof window.DEFAULT_COL_WIDTH_EMU === "undefined") {
+    window.DEFAULT_COL_WIDTH_EMU = window.EMU_PER_PIXEL * window.DEFAULT_COL_WIDTH_PX;   /* 609 600 EMU */
+}
+
+/* 既に定義済みでなければグローバルへ生やす */
+if (typeof DEBUG_EXTRACT_ALL === "undefined") {
+    /* window に直接代入してブローバル変数として参照できるようにする */
+    window.DEBUG_EXTRACT_ALL = true;   // デバッグ用フラグ
+}
+
+/* ---------- Excel 図形の "デフォルト名" 判定用パターン ---------- */
+if (typeof window.DEFAULT_LABEL_PATTERNS === "undefined") {
+    window.DEFAULT_LABEL_PATTERNS = [
+        /^Rectangle \d+$/i,
+        /^正方形\/長方形 \d+$/,
+        /^Line \d+$/i,
+        /^四角形: 角を丸くする \d+$/,
+        /^コネクタ:.*?\d+$/,
+        /^直線矢印コネクタ \d+$/,
+        /^Text Box \d+$/,
+        /^フローチャート: 処理 \d+$/,
+        /^フローチャート: 結合子 \d+$/,
+        /^Freeform \d+$/,
+        /^テキスト ボックス \d+$/,
+        /^円\/楕円 \d+$/,
+        /^AutoShape \d+$/
+    ];
+}
+
+/* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
+if (typeof window.NS_MAIN === "undefined") {
+    window.NS_MAIN               = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+}
+if (typeof window.NS_RELATIONSHIPS === "undefined") {
+    window.NS_RELATIONSHIPS      = "http://schemas.openxmlformats.org/package/2006/relationships";
+}
+if (typeof window.NS_DRAWINGML === "undefined") {
+    window.NS_DRAWINGML          = "http://schemas.openxmlformats.org/drawingml/2006/main";
+}
+if (typeof window.NS_SPREADSHEETDRAWING === "undefined") {
+    window.NS_SPREADSHEETDRAWING = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+}
+
+/* ---------- 匿名コネクタ ID 用カウンタ ---------- */
+if (typeof window.__CXN_AUTO_ID === "undefined") {
+    window.__CXN_AUTO_ID = 0;
+}
+
+
+/*  ▼ サンプル実装が期待するダミー関数 (UI 非依存化)  */
+if (typeof logMessage === "undefined") {
+    function logMessage(msg, type = "info") { console.log(`[${type.toUpperCase()}] ${msg}`); }
+}
+if (typeof updateProgress === "undefined") {
+    function updateProgress() { /* no-op (progress bar は本ツールには存在しない) */ }
+}
+if (typeof hideProgress === "undefined") {
+    function hideProgress() { /* no-op */ }
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加箇所 0-B :  抽出結果をシート別の構造化テキストへ整形  ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.formatToTextBySheet === "undefined") {
+    window.formatToTextBySheet = function(resultsBySheet) {
+
+        let output = "";
+
+        const sheetNames = Object.keys(resultsBySheet).sort();  // 名前順で安定化
+        for (const sheetName of sheetNames) {
+            const data = resultsBySheet[sheetName];
+            output += "【" +
+                        `Shapes in ${sheetName}` +
+                        "】\n";
+
+            if (!data || (data.nodes.length === 0 && data.edges.length === 0)) {
+                output += "(No relevant nodes or edges extracted for this sheet)\n\n";
+                continue;
+            }
+
+            /* ---------- Nodes ---------- */
+            output += "--- NODES ---\n";
+            if (data.nodes.length > 0) {
+                data.nodes.forEach(node => {
+                    const nodeLabel   = isDefaultLabel(node.label) ? "" : node.label;
+                    const escaped     = nodeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
+                    const groupInfo   = node.groupId ? `, GroupID:${node.groupId}`.replace(/drawing/g, '') : "";
+                    const rowInfo     = (node.row !== null && node.row !== undefined && Number.isFinite(node.row)) ? node.row : "inf";
+                    const colInfo     = (node.col !== null && node.col !== undefined && Number.isFinite(node.col)) ? node.col : "inf";
+                    output += `ID:${node.id}, `.replace(/drawing/g, '') +
+                                `Label:"${escaped}"${groupInfo}, Row:${rowInfo}, Col:${colInfo}\n`;
+                });
+            } else {
+                output += "(No nodes extracted for this sheet)\n";
+            }
+
+            /* ---------- Edges ---------- */
+            output += "\n--- EDGES ---\n";
+            if (data.edges.length > 0) {
+                data.edges.forEach(edge => {
+                    const edgeLabel = isDefaultLabel(edge.label) ? "" : edge.label;
+                    const escaped   = edgeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
+                    const groupInfo = edge.groupId ? `, GroupID:${edge.groupId}`.replace(/drawing/g, '') : "";
+                    output += `ID:${edge.id}, Source:${edge.source}, Target:${edge.target}`.replace(/drawing/g, '') + `\n`;
+                });
+            } else {
+                output += "(No edges extracted for this sheet)\n";
+            }
+            output += "\n\n";
+        }
+
+        /* どのシートにもデータが無い場合のフォールバック */
+        if (sheetNames.length === 0) {
+            output = "# No sheets with associated drawings were found or processed.";
+        }
+        return output;
+    };
+}
+
+/* ---------- Connector 共通 ---------- */
+function processConnectorBase(cxnSp, prefix) {
+    try {
+        const cNvPr  = cxnSp.querySelector(":scope > nvCxnSpPr > cNvPr");
+        if (!cNvPr) return null;
+
+        const id      = `${prefix}_${cNvPr.getAttribute("id")}`;
+        const cNvCxn  = cxnSp.querySelector(":scope > nvCxnSpPr > cNvCxnSpPr");
+        const stId    = cNvCxn?.querySelector("a\\:stCxn, stCxn")?.getAttribute("id") || "0";
+        const endId   = cNvCxn?.querySelector("a\\:endCxn, endCxn")?.getAttribute("id") || "0";
+
+        const prstEl  = cxnSp.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
+        const type    = prstEl ? prstEl.getAttribute("prst") || "customConnector" : "customConnector";
+        const text    = extractTextFromElement(cxnSp) || "";
+
+        return {
+            id,
+            source : stId === "0" ? null : `${prefix}_${stId}`,
+            target : endId === "0" ? null : `${prefix}_${endId}`,
+            type,
+            label  : text,
+            groupId: null
+        };
+    } catch (e) {
+        console.error("[processConnectorBase]", e);
+        return null;
+    }
+}
+
+
+    
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加箇所 0-A :  extractStructuredShapesFromExcel で必要なヘルパー群  ★★
+    ………………………………………………………………………………………………………………………… */
+
+/* ---------- 1. workbook.xml を解析してシート情報(r:id ↔ name)を取得 ---------- */
+function parseWorkbook(xmlString) {
+    const sheets = {};
+    try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+        const parserError = xmlDoc.querySelector("parsererror");
+        if (parserError) { logMessage(`XML 解析エラー (workbook.xml): ${parserError.textContent}`, "error"); return {}; }
+
+        const sheetElements = xmlDoc.getElementsByTagName("sheet");
+        for (let i = 0; i < sheetElements.length; i++) {
+            const sheet = sheetElements[i];
+            const name   = sheet.getAttribute("name");
+            const sheetId= sheet.getAttribute("sheetId");
+            const rId    = sheet.getAttribute("r:id");
+            if (name && sheetId && rId) sheets[rId] = { name, sheetId };
+        }
+    } catch (e) {
+        console.error("[DEBUG] parseWorkbook error:", e);
+    }
+    return sheets;
+}
+
+/* ---------- 2. worksheet の rels をたどり sheet↔drawing のマップを生成 ---------- */
+async function parseSheetRelationships(zip, sheets) {
+    const sheetDrawingMap = {};
+    const parser = new DOMParser();
+
+    /* workbook.xml.rels から worksheet ファイルのパスを得る */
+    const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
+    if (!wbRelsXml) return sheetDrawingMap;
+
+    const wbRelsDoc = parser.parseFromString(wbRelsXml, "application/xml");
+    const wbRels    = wbRelsDoc.getElementsByTagName("Relationship");
+    const worksheetPathMap = {};
+    for (const rel of wbRels) {
+        const type   = rel.getAttribute("Type");
+        const rId    = rel.getAttribute("Id");
+        const target = rel.getAttribute("Target");
+        if (type && rId && target && type.endsWith("/worksheet")) {
+            worksheetPathMap[rId] = `xl/${target.replace(/^\/+/, "")}`;
+        }
+    }
+
+    /* 各 worksheet の rels から drawing を探す */
+    for (const rId in sheets) {
+        const sheetInfo  = sheets[rId];
+        const wsPath     = worksheetPathMap[rId];
+        if (!wsPath) continue;
+
+        const sheetDir        = wsPath.substring(0, wsPath.lastIndexOf("/"));          // 例: xl/worksheets
+        const sheetFileName   = wsPath.substring(wsPath.lastIndexOf("/") + 1);         // 例: sheet1.xml
+        const relsPath        = `${sheetDir}/_rels/${sheetFileName}.rels`;             // 例: xl/worksheets/_rels/sheet1.xml.rels
+        const relsXml         = await zip.file(relsPath)?.async("string");
+        if (!relsXml) continue;
+
+        const relsDoc  = parser.parseFromString(relsXml, "application/xml");
+        const rels     = relsDoc.getElementsByTagName("Relationship");
+        for (const rel of rels) {
+            const type   = rel.getAttribute("Type");
+            const target = rel.getAttribute("Target");
+            if (type && target && type.endsWith("/drawing")) {
+                /* 重要: 基準パスを sheetDir に変更して正しい絶対パスを解決 */
+                const drawingAbsPath = resolvePath(sheetDir, target);                  // ← ここを修正
+                sheetDrawingMap[sheetInfo.name] = drawingAbsPath;
+                break;
+            }
+        }
+    }
+    return sheetDrawingMap;
+}
+
+
+/* ---------- 3. 図形の default 名称か判定 ---------- */
+function isDefaultLabel(label) {
+    if (!label) return false;
+    return DEFAULT_LABEL_PATTERNS.some(p => p.test(label.trim()));
+}
+
+/* ---------- 4. Shape / Connector 共通の薄いラッパ ---------- */
+function processShapeBase(sp, prefix) {
+    try {
+        const cNvPr = sp.querySelector(":scope > nvSpPr > cNvPr");
+        if (!cNvPr) return null;
+        const id     = `${prefix}_${cNvPr.getAttribute("id")}`;
+        const name   = cNvPr.getAttribute("name") || "";
+        const prstEl = sp.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
+        const type   = prstEl ? prstEl.getAttribute("prst") || "custom" : "custom";
+        const text   = extractTextFromElement(sp) || name;
+        console.log("id", id);
+        console.log("type", type);
+        console.log("text", text);
+        return { id, type, label: text, groupId: null };
+    } catch (e) {
+        console.error("[DEBUG] processShapeBase error:", e);
+        return null;
+    }
+}
+
+/* ---------- 直線 (<xdr:sp> line) を Edge として扱う ---------- */
+function processLineShape(sp, prefix) {
+    try {
+        const cNvPr = sp.querySelector(":scope > nvSpPr > cNvPr");
+        if (!cNvPr) return null;
+
+        const id     = `${prefix}_${cNvPr.getAttribute("id")}`;
+        const prstEl = sp.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
+        const type   = prstEl ? prstEl.getAttribute("prst") || "line" : "line";
+        const text   = extractTextFromElement(sp) || "";
+
+        /* 線は端点未接続として初期化 – 後段の近傍探索で source/target を補完 */
+        return {
+            id,
+            source : null,
+            target : null,
+            type   : type,
+            label  : text,
+            groupId: null
+        };
+    } catch (e) {
+        console.error("[processLineShape error]", e);
+        return null;
+    }
+}
+
+function processConnectorBase(cxnSp, prefix) {
+    try {
+        /* ① ID 取得 ― 欠落している場合は自動採番 */
+        const cNvPr = cxnSp.querySelector(":scope > nvCxnSpPr > cNvPr");
+        let id;
+        if (cNvPr) {
+            id = `${prefix}_${cNvPr.getAttribute("id")}`;
+        } else {
+            id = `${prefix}_anonCxn_${window.__CXN_AUTO_ID++}`;
+            console.log(`[UNNAMED] cxnSp without cNvPr captured → ${id}`);
+        }
+
+        /* ② 端点取得（未接続は null） */
+        const cNvCxn   = cxnSp.querySelector(":scope > nvCxnSpPr > cNvCxnSpPr");
+        const stIdAttr = cNvCxn?.querySelector("a\\:stCxn, stCxn")?.getAttribute("id") || "0";
+        const endIdAttr= cNvCxn?.querySelector("a\\:endCxn, endCxn")?.getAttribute("id") || "0";
+
+        const source = stIdAttr === "0" ? null : `${prefix}_${stIdAttr}`;
+        const target = endIdAttr === "0" ? null : `${prefix}_${endIdAttr}`;
+
+        /* ③ 種類 & ラベル */
+        const prstEl = cxnSp.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
+        const type   = prstEl ? prstEl.getAttribute("prst") || "customConnector" : "customConnector";
+        const label  = extractTextFromElement(cxnSp) || "";
+
+        return { id, source, target, type, label, groupId: null };
+    } catch (e) {
+        console.error("[processConnectorBase error]", e);
+        return null;
+    }
+}
+
+
+function getGroupId(grpSp, prefix) {
+    try {
+        const cNvPr = grpSp.querySelector(":scope > nvGrpSpPr > cNvPr");
+        return cNvPr ? `${prefix}_${cNvPr.getAttribute("id")}` : null;
+    } catch { return null; }
+}
+
+/* ---------- Anchor 端点取得  (EMU → セル座標を含む) ---------- */
+function getAnchorEndpoint(elem, endpoint /* 'from' | 'to' */) {
+    let anchor = elem;
+    while (
+        anchor &&
+        !(
+            anchor.namespaceURI === NS_SPREADSHEETDRAWING &&
+            (anchor.localName === "twoCellAnchor" || anchor.localName === "oneCellAnchor")
+        )
+    ) {
+        anchor = anchor.parentElement;
+    }
+    if (!anchor) return { row: Infinity, col: Infinity };
+
+    const endEl = anchor.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, endpoint)[0];
+    if (!endEl) return { row: Infinity, col: Infinity };
+
+    const rowNode    = endEl.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, "row")[0];
+    const colNode    = endEl.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, "col")[0];
+    const rowOffNode = endEl.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, "rowOff")[0];
+    const colOffNode = endEl.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, "colOff")[0];
+
+    const baseRow = parseInt(rowNode?.textContent || "0", 10);
+    const baseCol = parseInt(colNode?.textContent || "0", 10);
+    const rowOff  = parseInt(rowOffNode?.textContent || "0", 10);
+    const colOff  = parseInt(colOffNode?.textContent || "0", 10);
+
+    const row = isNaN(baseRow)
+        ? Infinity
+        : baseRow + rowOff / window.DEFAULT_ROW_HEIGHT_EMU;
+    const col = isNaN(baseCol)
+        ? Infinity
+        : baseCol + colOff / window.DEFAULT_COL_WIDTH_EMU;
+
+    return { row, col };
+}
+
+/* ---------- drawing.xml から nodes / edges を抽出 ---------- */
+function extractStructure(xmlDoc, drawingPath, extractAll = false) {
+
+    /* ===== 0. 初期セットアップ ========================================== */
+    const nodes            = [];
+    const edges            = [];
+    const elementMap       = {};
+    const connectedNodeIds = new Set();
+    const prefix           = drawingPath.split("/").pop().replace(".xml", "");
+    
+    /* ===== 1. 距離関数 (長方形–点 最短距離) ============================== */
+    const dist = (rect, p) => {
+        console.log("rect", rect);
+        console.log("p", p);
+        if (p.row === Infinity || p.col === Infinity) return Infinity;
+        const dx = p.col < rect.minCol ? rect.minCol - p.col :
+                  p.col > rect.maxCol ? p.col - rect.maxCol : 0;
+        const dy = p.row < rect.minRow ? rect.minRow - p.row :
+                  p.row > rect.maxRow ? p.row - rect.maxRow : 0;
+        console.log("dx", dx);
+        console.log("dy", dy);
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+    
+    /* ===== 2. 1st パス: <sp> / <cxnSp> 収集 ============================== */
+    const allElems = xmlDoc.getElementsByTagName("*");
+    for (const el of allElems) {
+        if (el.namespaceURI !== NS_SPREADSHEETDRAWING) continue;
+    
+        if (el.localName === "sp") {
+            const prstEl   = el.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
+            const shapeTyp = prstEl ? prstEl.getAttribute("prst") || "custom" : "custom";
+            if (shapeTyp === "line" || shapeTyp === "lineInv") {
+                const e = processLineShape(el, prefix);
+                if (e) { edges.push(e); elementMap[e.id] = el; }
+            } else {
+                const n = processShapeBase(el, prefix);
+                if (n) { nodes.push(n); elementMap[n.id]  = el; }
+            }
+        } else if (el.localName === "cxnSp") {
+            const e = processConnectorBase(el, prefix);
+            edges.push(e);
+            elementMap[e.id] = el;
+            if (e.source) connectedNodeIds.add(e.source);
+            if (e.target) connectedNodeIds.add(e.target);
+
+            if (!e.source || !e.target) {
+                console.log(
+                    `[UNATTACHED] cxnSp captured: ${e.id} (src=${e.source}, tgt=${e.target})`
+                );
+            }
+        }
+    }
+    
+    /* ===== 3. ノード矩形マップ (グループ化前) ============================ */
+    const nodeRectMap = {};
+    nodes.forEach(n => {
+        const pFrom = getAnchorEndpoint(elementMap[n.id], "from");
+        const pTo   = getAnchorEndpoint(elementMap[n.id], "to");
+        nodeRectMap[n.id] = {
+            minRow: Math.min(pFrom.row, pTo.row),
+            maxRow: Math.max(pFrom.row, pTo.row),
+            minCol: Math.min(pFrom.col, pTo.col),
+            maxCol: Math.max(pFrom.col, pTo.col)
+        };
+    });
+    
+    /* ===== 4. 近傍補完 (グループ化前なので従来通り動く) =================== */
+    edges.forEach(e => {
+        console.log("e", e);
+        /* --- source --- */
+        if (!e.source) {
+            const pos = getAnchorEndpoint(elementMap[e.id], "from");
+            console.log("source edgePos", pos);
+            
+            let best = Infinity, nearest = null;
+            for (const nid in nodeRectMap) {
+                const d = dist(nodeRectMap[nid], pos);
+                if (d < best) { best = d; nearest = nid; }
+            }
+            console.log("nearest", nearest);
+            console.log("best", best);
+            if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
+                e.source = nearest;
+                connectedNodeIds.add(nearest);
+                console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
+            }
+        }
+        /* --- target --- */
+        if (!e.target) {
+            const pos = getAnchorEndpoint(elementMap[e.id], "to");
+            console.log("target edgePos", pos);
+            let best = Infinity, nearest = null;
+            for (const nid in nodeRectMap) {
+                const d = dist(nodeRectMap[nid], pos);
+                if (d < best) { best = d; nearest = nid; }
+            }
+            console.log("nearest", nearest);
+            console.log("best", best);
+            if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
+                e.target = nearest;
+                connectedNodeIds.add(nearest);
+                console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
+            }
+        }
+    });
+    
+    /* ===== 5. grpSp 親集約 ============================================== */
+    const nodeToTopGroup  = {};                    // 子ID → 親GID
+    const groupAggregates = {};                    // 親GID → {labelParts, childIds}
+    
+    nodes.forEach(n => {
+        const el = elementMap[n.id];
+        if (!el) return;
+        let p = el.parentElement, topGrp = null;
+        while (p) {
+            if (p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp")
+                topGrp = p;
+            p = p.parentElement;
+        }
+        if (topGrp) {
+            const gid = getGroupId(topGrp, prefix);
+            if (gid) {
+                nodeToTopGroup[n.id] = gid;
+                if (!groupAggregates[gid])
+                    groupAggregates[gid] = { labelParts: [], childIds: [] };
+                if (n.label && !isDefaultLabel(n.label))
+                    groupAggregates[gid].labelParts.push(n.label);
+                groupAggregates[gid].childIds.push(n.id);
+            }
+        }
+    });
+    
+    /* --- 親グループノード生成 --- */
+    const groupNodes = [];
+    for (const gid in groupAggregates) {
+        groupNodes.push({ id: gid, type: "group", label: groupAggregates[gid].labelParts.join("\\n"), groupId: null });
+    }
+    
+    /* --- 端点を親へ付け替え --- */
+    edges.forEach(e => {
+        if (e.source && nodeToTopGroup[e.source]) e.source = nodeToTopGroup[e.source];
+        if (e.target && nodeToTopGroup[e.target]) e.target = nodeToTopGroup[e.target];
+    });
+    
+    /* --- 子ノード削除・親ノード追加 --- */
+    const childSet = new Set(Object.keys(nodeToTopGroup));
+    for (let i = nodes.length - 1; i >= 0; i--) {
+        if (childSet.has(nodes[i].id)) nodes.splice(i, 1);
+    }
+    nodes.push(...groupNodes);
+    
+    /* --- グループ矩形 = 子のBBox --- */
+    for (const gid in groupAggregates) {
+        let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+        groupAggregates[gid].childIds.forEach(cid => {
+            const r = nodeRectMap[cid]; if (!r) return;
+            minR = Math.min(minR, r.minRow); maxR = Math.max(maxR, r.maxRow);
+            minC = Math.min(minC, r.minCol); maxC = Math.max(maxC, r.maxCol);
+        });
+        nodeRectMap[gid] = (minR === Infinity)
+            ? { minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity }
+            : { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
+    }
+    
+    /* ===== 6. 自己ループ・幽霊端点を除去 ================================ */
+    for (let i = edges.length - 1; i >= 0; i--) {
+        const e = edges[i];
+        if (!e.source || !e.target || e.source === e.target) { edges.splice(i, 1); continue; }
+        if (!nodeRectMap[e.source] || !nodeRectMap[e.target]) edges.splice(i, 1);
+    }
+    
+    /* ===== 7. 最終フィルタリング ======================================= */
+    const finalNodes = nodes.filter(n =>
+        (n.type === "group" || extractAll || TARGET_SHAPE_PRESETS.has(n.type)) &&
+        !(isDefaultLabel(n.label) && !connectedNodeIds.has(n.id))
+    );
+    const finalEdges = edges.filter(e =>
+        (extractAll || TARGET_SHAPE_PRESETS.has(e.type))
+    );
+
+    /* ===== 8. 位置情報付与 (min/max の中央値を整数化) ================== */
+    finalNodes.forEach(n => {
+        const rect = nodeRectMap[n.id];
+        if (rect) {
+            const rowMid = (rect.minRow + rect.maxRow) / 2;
+            const colMid = (rect.minCol + rect.maxCol) / 2;
+            n.row = Number.isFinite(rowMid) ? Math.round(rowMid) : null;
+            n.col = Number.isFinite(colMid) ? Math.round(colMid) : null;
+        } else {
+            n.row = null;
+            n.col = null;
+        }
+    });
+
+    return { nodes: finalNodes, edges: finalEdges };
+    }
+    
+
+
+/* ---------- 6. 図形内テキスト抽出（Shape / Connector で共用） ---------- */
+function extractTextFromElement(element) {
+    try {
+        const txBody = element.getElementsByTagNameNS(NS_SPREADSHEETDRAWING, "txBody")[0];
+        if (!txBody) return "";
+        const paragraphs = txBody.getElementsByTagNameNS(NS_DRAWINGML, "p");
+        const lines = [];
+        for (const p of paragraphs) {
+            const runs = p.getElementsByTagNameNS(NS_DRAWINGML, "r");
+            let line   = "";
+            for (const r of runs) {
+                const t = r.getElementsByTagNameNS(NS_DRAWINGML, "t")[0];
+                if (t) line += t.textContent;
+            }
+            lines.push(line);
+        }
+        return lines.join("\n").trim();
+    } catch {
+        return "";
+    }
+}
+
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加箇所 1  :  Excel ファイルから図形を構造化テキストで抽出する関数  ★★
+    ………………………………………………………………………………………………………………………… */
+/**
+ *  引数: arrayBuffer   – File から取得した ArrayBuffer
+ *  戻値: string        – formatToTextBySheet() で生成した構造化テキスト
+ */
+async function extractStructuredShapesFromExcel(arrayBuffer) {
+    try {
+        /* JSZip で XLSX を展開 */
+        const zip = await JSZip.loadAsync(arrayBuffer);
+
+        /* workbook.xml 解析 → シート一覧取得 */
+        const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
+        if (!workbookXml) return "";
+        const sheets = parseWorkbook(workbookXml);
+        if (Object.keys(sheets).length === 0) return "";
+
+        /* workbook / worksheet 間の rels 解析 → sheet ↔ drawing マップを作成 */
+        const sheetDrawingMap = await parseSheetRelationships(zip, sheets);
+        const drawingSet      = new Set(Object.values(sheetDrawingMap));
+
+        /* drawing XML 読込 */
+        const drawingXmlsMap = {};
+        for (const drawingPath of drawingSet) {
+            const xml = await zip.file(drawingPath)?.async("string");
+            if (xml) drawingXmlsMap[drawingPath] = xml;
+        }
+
+        /*  各 Drawing を解析して nodes / edges を蓄積  */
+        const resultsBySheet   = {};
+        const processedDrawings = new Map();
+
+        for (const sheetName in sheetDrawingMap) {
+            const drawingPath = sheetDrawingMap[sheetName];
+            if (!drawingXmlsMap[drawingPath]) continue;
+
+            if (!processedDrawings.has(drawingPath)) {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(drawingXmlsMap[drawingPath], "application/xml");
+                const { nodes, edges } = extractStructure(xmlDoc, drawingPath, DEBUG_EXTRACT_ALL);
+                processedDrawings.set(drawingPath, { nodes, edges });
+            }
+
+            const { nodes, edges } = processedDrawings.get(drawingPath);
+            if (nodes.length === 0 && edges.length === 0) continue;
+
+            if (!resultsBySheet[sheetName]) resultsBySheet[sheetName] = { nodes: [], edges: [] };
+            resultsBySheet[sheetName].nodes.push(...nodes);
+            resultsBySheet[sheetName].edges.push(...edges);
+        }
+
+        if (Object.keys(resultsBySheet).length === 0) return "";
+        return formatToTextBySheet(resultsBySheet);
+    } catch (err) {
+        console.error("[DEBUG] extractStructuredShapesFromExcel error:", err);
+        return "";
+    }
+}
+
+/*  …………………………………………………………………………………………………………………………
     ★★ 追加箇所 1  :  操作ログ送信用ユーティリティ関数  ★★
     ………………………………………………………………………………………………………………………… */
 function sendOperationLog(logData) {
@@ -772,174 +1463,167 @@ function resolvePath(basePath, relativePath) {
 }
 
 
-// ▼▼▼ 3-3. Excel ファイル読み込みを async 化し、図形内テキストも抽出 ▼▼▼
-// ★★★ 改良：空行・空列削除、セル内整形処理、日付フォーマット適用を追加 ★★★
+/*  …………………………………………………………………………………………………………………………
+    ★★ 改めて修正: readExcelFile ★★
+      1. セル抽出ロジックは "改修前" のまま完全再現
+      2. structuredShapeText をシートごとに分割し、
+         セル出力の直後に同シート分だけ連結
+      3. シート名を判定できなかった図形 ("不明なシート" 等) は
+         ループ後にまとめて出力
+    ………………………………………………………………………………………………………………………… */
 async function readExcelFile(file) {
-    // console.log("[DEBUG] readExcelFile called (async):", file.name);
-    const data = new Uint8Array(await file.arrayBuffer());
+    /* ① ArrayBuffer を保持（図形抽出ロジックにも渡すため） */
+    const arrayBuffer = await file.arrayBuffer();
+    const data        = new Uint8Array(arrayBuffer);
+
     try {
-        // ★★★ 修正点 1: オプションに cellNF: true, cellDates: true を追加 ★★★
-        // cellNF: true -> セルの数値書式(zプロパティ)を読み込む
-        // cellDates: true -> 日付をDateオブジェクトとして読み込む (cellNFと併用)
-        // console.log("[DEBUG] About to XLSX.read (async) ...", file.name);
+        /* ② SheetJS で Workbook 読み込み（元コード通り） */
         const workbook = XLSX.read(data, {
-            type: 'array',
-            cellComments: true, // メモ取得
-            bookFiles: true,    // 図形抽出用
-            cellNF: true,       // 数値書式を読み込む
-            cellDates: true     // 日付をDateオブジェクトとして読み込む
+            type:        'array',
+            cellComments:true,
+            bookFiles:   true,
+            cellNF:      true,
+            cellDates:   true
         });
-        // console.log("[DEBUG] XLSX.read complete:", file.name);
 
         let text = "";
-        workbook.SheetNames.forEach(sheetName => {
-            // console.log("[DEBUG] Processing sheet:", sheetName);
-            const sheet = workbook.Sheets[sheetName];
-            const sheetRef = sheet['!ref']; // シートの範囲 (例: "A1:C10")
-            let jsonData = []; // フォーマット適用後のデータを格納する配列
 
-            // ★★★ 修正点 2: sheet_to_json の代わりにセルを個別に処理 ★★★
+        /* ③ 先に図形を一括抽出し "シート名 → 図形テキスト" へ整形 */
+        const structuredShapeText = await extractStructuredShapesFromExcel(arrayBuffer);
+        const shapeTextMap        = {};   // { sheetName : string }
+
+        if (structuredShapeText.trim()) {
+            const re = /【Shapes in ([^】]+)】([\s\S]*?)(?=【Shapes in [^】]+】|\s*$)/g;
+            let m;
+            while ((m = re.exec(structuredShapeText)) !== null) {
+                const sheetName = m[1];
+                const body      = m[2];
+                shapeTextMap[sheetName] = `【Shapes in ${sheetName}】${body}\n`;
+            }
+        }
+
+        /* ④ シート順にセル情報 → コメント → 図形を出力 */
+        workbook.SheetNames.forEach(sheetName => {
+            const sheet    = workbook.Sheets[sheetName];
+            const sheetRef = sheet['!ref'];
+            let   jsonData = [];
+
+            /* ---------- 4-1. セルの TSV 抽出（元ロジックそのまま） ---------- */
             if (sheetRef) {
                 const range = XLSX.utils.decode_range(sheetRef);
-                // jsonData を適切なサイズで初期化 (空文字列で埋める)
-                jsonData = Array(range.e.r + 1).fill(null).map(() => Array(range.e.c + 1).fill(""));
+                jsonData    = Array(range.e.r + 1).fill(null)
+                                .map(() => Array(range.e.c + 1).fill(""));
 
                 for (let R = range.s.r; R <= range.e.r; ++R) {
                     for (let C = range.s.c; C <= range.e.c; ++C) {
-                        const cellAddress = { c: C, r: R };
-                        const cellRef = XLSX.utils.encode_cell(cellAddress);
-                        const cell = sheet[cellRef];
+                        const cellAddr = { r: R, c: C };
+                        const cellRef  = XLSX.utils.encode_cell(cellAddr);
+                        const cell     = sheet[cellRef];
 
-                        let cellValue = ""; // デフォルトは空文字列
-                        if (cell && cell.v !== undefined) { // セルとその値が存在する場合
-                            // cell.w は書式適用済みのテキスト (優先的に使用)
-                            // cell.w がない場合、format_cell で書式を適用
-                            // format_cell は cellDates:true で読み込んだ日付オブジェクトも適切に処理する
+                        let cellValue  = "";
+                        if (cell && cell.v !== undefined) {
                             cellValue = cell.w || XLSX.utils.format_cell(cell);
                         }
 
-                        // セル内容の前処理 (改行、タブ、連続空白の除去)
                         if (cellValue === null || cellValue === undefined) {
-                             cellValue = "";
-                         } else {
-                             cellValue = String(cellValue); // 文字列に変換
-                         }
-                        let cleanedCell = cellValue.replace(/[\n\t]+/g, ' ');
-                        cleanedCell = cleanedCell.replace(/\s{2,}/g, ' ');
-                        cleanedCell = cleanedCell.trim();
-
-                        // ★★★ jsonData の対応する位置に格納 ★★★
-                        if (jsonData[R] === undefined) jsonData[R] = []; // 行が存在しない場合初期化(念のため)
+                            cellValue = "";
+                        } else {
+                            cellValue = String(cellValue);
+                        }
+                        let cleanedCell = cellValue
+                                            .replace(/[\n\t]+/g, " ")
+                                            .replace(/\s{2,}/g, " ")
+                                            .trim();
                         jsonData[R][C] = cleanedCell;
                     }
                 }
-                // jsonData の先頭の空行を削除 (SheetJSの範囲は0行目から始まるため)
-                // jsonData = jsonData.slice(range.s.r); // A1から始まらないシートの場合、これでいいか要検討 → 下の空行削除で対応
-
-            } else {
-                // シートが空か、'!ref'がない場合
-                 jsonData = []; // 空のデータとして扱う
             }
 
-            // ★★★ 修正点 3: 空行削除のロジックを調整 ★★★
-            // jsonData は既にフォーマット済みテキストの2次元配列になっている
-            const processedData = jsonData.filter(row => row && row.some(cell => cell !== "")); // 実質的に空でない行のみを残す
+            /* 空行削除 */
+            const processedData = jsonData.filter(
+                row => row && row.some(cell => cell !== "")
+            );
 
-            // --- ここから下の空列削除、TSV化、コメント処理、図形処理は変更なし ---
-
-            // 3. 空列削除
+            /* 空列削除 */
             let finalData = [];
             if (processedData.length > 0) {
-                const numCols = Math.max(0, ...processedData.map(row => row ? row.length : 0)); // 最大列数を取得 (空配列の場合も考慮)
+                const numCols = Math.max(
+                    0,
+                    ...processedData.map(row => (row ? row.length : 0))
+                );
                 const colsToRemove = new Set();
 
                 for (let j = 0; j < numCols; j++) {
-                    let isColEmpty = true;
+                    let isEmpty = true;
                     for (let i = 0; i < processedData.length; i++) {
-                        if (processedData[i] && processedData[i][j] !== undefined && processedData[i][j] !== "") {
-                            isColEmpty = false;
+                        if (processedData[i] && processedData[i][j] !== "") {
+                            isEmpty = false;
                             break;
                         }
                     }
-                    if (isColEmpty) {
-                        colsToRemove.add(j);
-                    }
+                    if (isEmpty) colsToRemove.add(j);
                 }
 
-                // 空でない列だけを含む新しいデータを作成
                 finalData = processedData.map(row => {
                     const newRow = [];
-                    if (!row) return newRow; // 行自体がない場合は空行
-                    const originalLength = row.length;
+                    if (!row) return newRow;
+                    const origLen = row.length;
                     for (let j = 0; j < numCols; j++) {
                         if (!colsToRemove.has(j)) {
-                            newRow.push(j < originalLength && row[j] !== undefined ? row[j] : "");
+                            newRow.push(j < origLen && row[j] !== undefined ? row[j] : "");
                         }
                     }
                     return newRow;
-                });
-
-                // 再度、空行が発生していないかチェック
-                finalData = finalData.filter(row => row && row.some(cell => cell !== ""));
+                }).filter(row => row && row.some(cell => cell !== ""));
             }
 
-
-            // 4. 最終的なデータをTSV化
             if (finalData.length > 0) {
-                // ★★★ 修正点 4: aoa_to_sheet と sheet_to_csv の代わりに手動でTSV化 ★★★
                 let tsv = finalData.map(row => row.join('\t')).join('\n');
-                // 行末のタブは join で発生しないはずだが、念のため残しておく
-                const lines = tsv.split('\n');
-                const trimmedLines = lines.map(line => line.replace(/\t+$/, ''));
+                /* 行末タブを念のため削除（元ロジック） */
+                const lines         = tsv.split('\n');
+                const trimmedLines  = lines.map(l => l.replace(/\t+$/, ""));
                 tsv = trimmedLines.join('\n');
+
                 text += `【Sheet: ${sheetName}】\n${tsv}\n\n\n`;
             } else {
-                 text += `【Sheet: ${sheetName}】\n(シートは空、または有効なデータがありません)\n\n\n`;
+                text += `【Sheet: ${sheetName}】\n(シートは空、または有効なデータがありません)\n\n\n`;
             }
 
-            // シート内のコメントも出力する (変更なし)
-            console.log(`[DEBUG] Checking comments for sheet: ${sheetName}`);
-            console.log("[DEBUG] sheet['!comments'] object:", sheet["!comments"]);
-
-            if (sheet["!comments"] && Array.isArray(sheet["!comments"]) && sheet["!comments"].length > 0) {
-                console.log("[DEBUG] Found comments data in sheet:", sheetName, sheet["!comments"].length);
+            /* ---------- 4-2. コメント出力（元ロジックそのまま） ---------- */
+            if (sheet['!comments'] && Array.isArray(sheet['!comments']) && sheet['!comments'].length > 0) {
                 text += `【Comments in ${sheetName}】\n`;
-                sheet["!comments"].forEach(comment => {
-                    console.log("[DEBUG] Processing comment object:", comment);
+                sheet['!comments'].forEach(comment => {
                     const author = comment.a || "unknown";
-                    const originalCommentText = comment.t || "";
-                    let cleanedCommentText = originalCommentText.replace(/[\n\t]+/g, ' ');
-                    cleanedCommentText = cleanedCommentText.replace(/\s{2,}/g, ' ');
-                    cleanedCommentText = cleanedCommentText.trim();
-                    if (cleanedCommentText) {
-                        const cellRef = comment.ref || "unknown cell";
-                        text += `Cell ${cellRef} (by ${author}): ${cleanedCommentText}\n`;
-                    } else {
-                        console.log(`[DEBUG] Comment text was empty after cleaning for cell ${comment.ref}`);
+                    const body   = String(comment.t || "")
+                                        .replace(/[\n\t]+/g, " ")
+                                        .replace(/\s{2,}/g, " ")
+                                        .trim();
+                    if (body) {
+                        text += `Cell ${comment.ref || "unknown cell"} (by ${author}): ${body}\n`;
                     }
                 });
                 text += "\n";
-            } else {
-                console.log(`[DEBUG] No comments data found or sheet["!comments"] is not a non-empty array for sheet: ${sheetName}`);
+            }
+
+            /* ---------- 4-3. 同シートの図形情報をすぐ後ろに ---------- */
+            if (shapeTextMap[sheetName]) {
+                text += `${shapeTextMap[sheetName]}\n`;
+                delete shapeTextMap[sheetName];  // 消し込む
             }
         });
 
-        // 図形(Shapes)の中のテキストを取得（非同期）(変更なし)
-        const shapeText = await extractShapeTextFromWorkbookAsync(workbook);
-        if (shapeText.trim()) {
-            // console.log("[DEBUG] shapeText extracted length:", shapeText.length);
-            text += `${shapeText}\n`;
-        } else {
-            // console.log("[DEBUG] No shapeText extracted.");
-        }
+        /* ⑤ シート名が取れなかった図形を最後にまとめる */
+        Object.keys(shapeTextMap).forEach(restName => {
+            text += `${shapeTextMap[restName]}\n`;
+        });
 
         return text;
     } catch (error) {
         console.error("[DEBUG] Error in readExcelFile:", error);
-        throw error; // エラーを呼び出し元に伝播させる
+        throw error;
     }
 }
-
+        
 // ▼▼▼ Word(docx) ファイルのテキストを、できる限りレイアウトを再現して抽出＋図形抽出＋空行削除＋階層インデント ▼▼▼
 function readWordFile(file) {
     // console.log("[DEBUG] readWordFile called:", file.name);

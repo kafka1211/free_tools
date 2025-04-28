@@ -7,7 +7,7 @@
     />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>プロンプトくん ver 2.2</title>
+    <title>プロンプトくん</title>
     <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -49,7 +49,7 @@
                 <button onclick="clearAll()" class="btn btn-secondary">クリア</button>
                 <div></div>
                 <div class="alert alert-danger" role="alert">
-                    <small>※Excelファイル内の全シートを対象に、文字情報は配置位置を考慮してテキスト化します。図形オブジェクト内の文字情報も取得し、可能な限り配置も再現します。ただし、図形オブジェクト間のつながり（矢印など）は取得できません。また、空の列と行は削除してテキストサイズを小さくします。</small>
+                    <small>[Ver 2.3] Excelファイル内の図形抽出機能を大幅に強化。図形の配置情報（セル座標近似）、テキスト内容、種類、グループ化、およびコネクタによる図形間の接続関係を解析し、構造化されたテキスト形式で出力する機能を追加しました。これにより、フローチャートなどの図の内容をより正確にAIに伝えることが可能になりました。</small>
                 </div>
             </div>
             <div id="file-list" class="p-3 border flex-fill">
