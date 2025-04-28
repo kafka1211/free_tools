@@ -6,21 +6,7 @@
 /* ---------- Excel 図形プリセット白リスト ---------- */
 if (typeof window.TARGET_SHAPE_PRESETS === "undefined") {
     window.TARGET_SHAPE_PRESETS = new Set([
-        "rect", "roundRect", "ellipse", "diamond", "parallelogram", "triangle",
-        "hexagon", "octagon", "flowChartProcess", "flowChartAlternateProcess",
-        "flowChartDecision", "flowChartInputOutput", "flowChartPredefinedProcess",
-        "flowChartInternalStorage", "flowChartDocument", "flowChartMultidocument",
-        "flowChartTerminator", "flowChartPreparation", "flowChartManualInput",
-        "flowChartManualOperation", "flowChartConnector", "flowChartOffpageConnector",
-        "flowChartCard", "flowChartPunchedTape", "flowChartSummingJunction", "flowChartOr",
-        "flowChartCollate", "flowChartSort", "flowChartExtract", "flowChartMerge",
-        "flowChartStoredData", "flowChartDelay", "flowChartSequentialAccessStorage",
-        "flowChartMagneticDisk", "flowChartDirectAccessStorage", "flowChartDisplay",
-        "flowChartOnlineStorage",
-        "line", "lineInv", "bentConnector2", "bentConnector3", "bentConnector4",
-        "bentConnector5", "curvedConnector2", "curvedConnector3", "curvedConnector4",
-        "curvedConnector5", "straightConnector1", "openRect",
-        "custom"
+
     ]);
 }
 
@@ -54,30 +40,8 @@ if (typeof window.DEFAULT_COL_WIDTH_EMU === "undefined") {
     window.DEFAULT_COL_WIDTH_EMU = window.EMU_PER_PIXEL * window.DEFAULT_COL_WIDTH_PX;   /* 609 600 EMU */
 }
 
-/* 既に定義済みでなければグローバルへ生やす */
-if (typeof DEBUG_EXTRACT_ALL === "undefined") {
-    /* window に直接代入してブローバル変数として参照できるようにする */
-    window.DEBUG_EXTRACT_ALL = true;   // デバッグ用フラグ
-}
 
-/* ---------- Excel 図形の "デフォルト名" 判定用パターン ---------- */
-if (typeof window.DEFAULT_LABEL_PATTERNS === "undefined") {
-    window.DEFAULT_LABEL_PATTERNS = [
-        /^Rectangle \d+$/i,
-        /^正方形\/長方形 \d+$/,
-        /^Line \d+$/i,
-        /^四角形: 角を丸くする \d+$/,
-        /^コネクタ:.*?\d+$/,
-        /^直線矢印コネクタ \d+$/,
-        /^Text Box \d+$/,
-        /^フローチャート: 処理 \d+$/,
-        /^フローチャート: 結合子 \d+$/,
-        /^Freeform \d+$/,
-        /^テキスト ボックス \d+$/,
-        /^円\/楕円 \d+$/,
-        /^AutoShape \d+$/
-    ];
-}
+
 
 /* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
 if (typeof window.NS_MAIN === "undefined") {
@@ -103,12 +67,7 @@ if (typeof window.__CXN_AUTO_ID === "undefined") {
 if (typeof logMessage === "undefined") {
     function logMessage(msg, type = "info") { console.log(`[${type.toUpperCase()}] ${msg}`); }
 }
-if (typeof updateProgress === "undefined") {
-    function updateProgress() { /* no-op (progress bar は本ツールには存在しない) */ }
-}
-if (typeof hideProgress === "undefined") {
-    function hideProgress() { /* no-op */ }
-}
+
 
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加箇所 0-B :  抽出結果をシート別の構造化テキストへ整形  ★★
@@ -134,7 +93,7 @@ if (typeof window.formatToTextBySheet === "undefined") {
             output += "--- NODES ---\n";
             if (data.nodes.length > 0) {
                 data.nodes.forEach(node => {
-                    const nodeLabel   = isDefaultLabel(node.label) ? "" : node.label;
+                    const nodeLabel   = node.label;
                     const escaped     = nodeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
                     const groupInfo   = node.groupId ? `, GroupID:${node.groupId}`.replace(/drawing/g, '') : "";
                     const rowInfo     = (node.row !== null && node.row !== undefined && Number.isFinite(node.row)) ? node.row : "inf";
@@ -150,7 +109,7 @@ if (typeof window.formatToTextBySheet === "undefined") {
             output += "\n--- EDGES ---\n";
             if (data.edges.length > 0) {
                 data.edges.forEach(edge => {
-                    const edgeLabel = isDefaultLabel(edge.label) ? "" : edge.label;
+                    const edgeLabel = edge.label;
                     const escaped   = edgeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
                     const groupInfo = edge.groupId ? `, GroupID:${edge.groupId}`.replace(/drawing/g, '') : "";
                     output += `ID:${edge.id}, Source:${edge.source}, Target:${edge.target}`.replace(/drawing/g, '') + `\n`;
@@ -277,29 +236,40 @@ async function parseSheetRelationships(zip, sheets) {
 }
 
 
-/* ---------- 3. 図形の default 名称か判定 ---------- */
-function isDefaultLabel(label) {
-    if (!label) return false;
-    return DEFAULT_LABEL_PATTERNS.some(p => p.test(label.trim()));
-}
 
-/* ---------- 4. Shape / Connector 共通の薄いラッパ ---------- */
+
+/* ---------- 4. Shape / Connector 共通の薄いラッパ  ---------- */
 function processShapeBase(sp, prefix) {
     try {
         const cNvPr = sp.querySelector(":scope > nvSpPr > cNvPr");
-        if (!cNvPr) return null;
-        const id     = `${prefix}_${cNvPr.getAttribute("id")}`;
-        const name   = cNvPr.getAttribute("name") || "";
+        if (!cNvPr) return null; // 必須要素がなければnullを返す
+
+        const id = `${prefix}_${cNvPr.getAttribute("id")}`;
+
+        // タイプを取得 (prstGeomがあればそのprst属性、なければ"custom")
         const prstEl = sp.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
-        const type   = prstEl ? prstEl.getAttribute("prst") || "custom" : "custom";
-        const text   = extractTextFromElement(sp) || name;
-        console.log("id", id);
-        console.log("type", type);
-        console.log("text", text);
-        return { id, type, label: text, groupId: null };
+        const type = prstEl ? prstEl.getAttribute("prst") || "custom" : "custom";
+
+        // テキスト抽出関数を呼び出し、結果をトリム
+        const extractedText = extractTextFromElement(sp); // extractTextFromElement内でtrim()されている想定
+        const label = extractedText;                      // 抽出したテキストをそのままlabelに設定
+
+        // テキストの有無を判定して hasText フラグを設定
+        const hasText = label !== "";                     // 空文字列でなければtrue
+
+        // デバッグログ (必要に応じてコメントアウトまたは削除)
+        console.log("[processShapeBase] ID:", id, "Type:", type, "Label:", `"${label}"`, "HasText:", hasText);
+
+        return {
+            id: id,
+            type: type,
+            label: label,    // 抽出されたテキスト (なければ空文字列)
+            hasText: hasText, // テキスト有無フラグ
+            groupId: null   // groupId は後続のグループ処理で設定される可能性があるため、ここでは null 初期化
+        };
     } catch (e) {
         console.error("[DEBUG] processShapeBase error:", e);
-        return null;
+        return null; // エラー発生時もnullを返す
     }
 }
 
@@ -407,7 +377,7 @@ function getAnchorEndpoint(elem, endpoint /* 'from' | 'to' */) {
 }
 
 /* ---------- drawing.xml から nodes / edges を抽出 ---------- */
-function extractStructure(xmlDoc, drawingPath, extractAll = false) {
+function extractStructure(xmlDoc, drawingPath) {
 
     /* ===== 0. 初期セットアップ ========================================== */
     const nodes            = [];
@@ -460,6 +430,28 @@ function extractStructure(xmlDoc, drawingPath, extractAll = false) {
         }
     }
     
+    // 一応残しておく
+    /* ---------- grpSp による groupId 付与 ---------- */
+    //for (const id in elementMap) {
+    //    let p = elementMap[id].parentElement;
+    //    while (
+    //        p &&
+    //        !(
+    //            p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp"
+    //        )
+    //    )
+    //        p = p.parentElement;
+    //    if (p) {
+    //        const gid = getGroupId(p, prefix);
+    //        if (gid) {
+    //            const it =
+    //                nodes.find((n) => n.id === id) || edges.find((e) => e.id === id);
+    //            if (it) it.groupId = gid;
+    //            console.log("[setGroupId]", it);
+    //        }
+    //    }
+    //}
+
     /* ===== 3. ノード矩形マップ (グループ化前) ============================ */
     const nodeRectMap = {};
     nodes.forEach(n => {
@@ -532,7 +524,7 @@ function extractStructure(xmlDoc, drawingPath, extractAll = false) {
                 nodeToTopGroup[n.id] = gid;
                 if (!groupAggregates[gid])
                     groupAggregates[gid] = { labelParts: [], childIds: [] };
-                if (n.label && !isDefaultLabel(n.label))
+                if (n.label && n.hasText)
                     groupAggregates[gid].labelParts.push(n.label);
                 groupAggregates[gid].childIds.push(n.id);
             }
@@ -542,7 +534,7 @@ function extractStructure(xmlDoc, drawingPath, extractAll = false) {
     /* --- 親グループノード生成 --- */
     const groupNodes = [];
     for (const gid in groupAggregates) {
-        groupNodes.push({ id: gid, type: "group", label: groupAggregates[gid].labelParts.join("\\n"), groupId: null });
+        groupNodes.push({ id: gid, type: "group", label: groupAggregates[gid].labelParts.join(" "), groupId: null });
     }
     
     /* --- 端点を親へ付け替え --- */
@@ -570,7 +562,7 @@ function extractStructure(xmlDoc, drawingPath, extractAll = false) {
             ? { minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity }
             : { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
     }
-    
+
     /* ===== 6. 自己ループ・幽霊端点を除去 ================================ */
     for (let i = edges.length - 1; i >= 0; i--) {
         const e = edges[i];
@@ -580,11 +572,11 @@ function extractStructure(xmlDoc, drawingPath, extractAll = false) {
     
     /* ===== 7. 最終フィルタリング ======================================= */
     const finalNodes = nodes.filter(n =>
-        (n.type === "group" || extractAll || TARGET_SHAPE_PRESETS.has(n.type)) &&
-        !(isDefaultLabel(n.label) && !connectedNodeIds.has(n.id))
+        (n.type === "group" || true) &&
+        !(!n.hasText && !connectedNodeIds.has(n.id))
     );
     const finalEdges = edges.filter(e =>
-        (extractAll || TARGET_SHAPE_PRESETS.has(e.type))
+        (true)
     );
 
     /* ===== 8. 位置情報付与 (min/max の中央値を整数化) ================== */
@@ -669,7 +661,7 @@ async function extractStructuredShapesFromExcel(arrayBuffer) {
             if (!processedDrawings.has(drawingPath)) {
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(drawingXmlsMap[drawingPath], "application/xml");
-                const { nodes, edges } = extractStructure(xmlDoc, drawingPath, DEBUG_EXTRACT_ALL);
+                const { nodes, edges } = extractStructure(xmlDoc, drawingPath);
                 processedDrawings.set(drawingPath, { nodes, edges });
             }
 
