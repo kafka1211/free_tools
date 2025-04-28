@@ -1,7 +1,3 @@
-/*  …………………………………………………………………………………………………………………………
-    ★★ 追加箇所 0  :  Excel 図形抽出用グローバル定義とダミーロガー  ★★
-    ………………………………………………………………………………………………………………………… */
-
 /*  ▼ 既に定義済みであれば再宣言を避けるため typeof チェックを入れる */
 
 /*  …………………………………………………………………………………………………………………………
@@ -54,12 +50,6 @@ if (typeof window.NS_SPREADSHEETDRAWING === "undefined") {
 /* ---------- 匿名コネクタ ID 用カウンタ ---------- */
 if (typeof window.__CXN_AUTO_ID === "undefined") {
     window.__CXN_AUTO_ID = 0;
-}
-
-
-/*  ▼ サンプル実装が期待するダミー関数 (UI 非依存化)  */
-if (typeof logMessage === "undefined") {
-    function logMessage(msg, type = "info") { console.log(`[${type.toUpperCase()}] ${msg}`); }
 }
 
 
@@ -164,7 +154,10 @@ function parseWorkbook(xmlString) {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xmlString, "application/xml");
         const parserError = xmlDoc.querySelector("parsererror");
-        if (parserError) { logMessage(`XML 解析エラー (workbook.xml): ${parserError.textContent}`, "error"); return {}; }
+        if (parserError) {
+            console.error(`XML 解析エラー (workbook.xml): ${parserError.textContent}`);
+            return {};
+        }
 
         const sheetElements = xmlDoc.getElementsByTagName("sheet");
         for (let i = 0; i < sheetElements.length; i++) {
@@ -252,7 +245,7 @@ function processShapeBase(sp, prefix) {
         const hasText = label !== "";                     // 空文字列でなければtrue
 
         // デバッグログ (必要に応じてコメントアウトまたは削除)
-        console.log("[processShapeBase] ID:", id, "Type:", type, "Label:", `"${label}"`, "HasText:", hasText);
+        // console.log("[processShapeBase] ID:", id, "Type:", type, "Label:", `"${label}"`, "HasText:", hasText);
 
         return {
             id: id,
@@ -302,7 +295,7 @@ function processConnectorBase(cxnSp, prefix) {
             id = `${prefix}_${cNvPr.getAttribute("id")}`;
         } else {
             id = `${prefix}_anonCxn_${window.__CXN_AUTO_ID++}`;
-            console.log(`[UNNAMED] cxnSp without cNvPr captured → ${id}`);
+            // console.log(`[UNNAMED] cxnSp without cNvPr captured → ${id}`);
         }
 
         /* ② 端点取得（未接続は null） */
@@ -382,15 +375,15 @@ function extractStructure(xmlDoc, drawingPath) {
     
     /* ===== 1. 距離関数 (長方形–点 最短距離) ============================== */
     const dist = (rect, p) => {
-        console.log("rect", rect);
-        console.log("p", p);
+        // console.log("rect", rect);
+        // console.log("p", p);
         if (p.row === Infinity || p.col === Infinity) return Infinity;
         const dx = p.col < rect.minCol ? rect.minCol - p.col :
                   p.col > rect.maxCol ? p.col - rect.maxCol : 0;
         const dy = p.row < rect.minRow ? rect.minRow - p.row :
                   p.row > rect.maxRow ? p.row - rect.maxRow : 0;
-        console.log("dx", dx);
-        console.log("dy", dy);
+        // console.log("dx", dx);
+        // console.log("dy", dy);
         return Math.sqrt(dx * dx + dy * dy);
     };
     
@@ -417,9 +410,7 @@ function extractStructure(xmlDoc, drawingPath) {
             if (e.target) connectedNodeIds.add(e.target);
 
             if (!e.source || !e.target) {
-                console.log(
-                    `[UNATTACHED] cxnSp captured: ${e.id} (src=${e.source}, tgt=${e.target})`
-                );
+                // console.log(`[UNATTACHED] cxnSp captured: ${e.id} (src=${e.source}, tgt=${e.target})`);
             }
         }
     }
@@ -461,40 +452,40 @@ function extractStructure(xmlDoc, drawingPath) {
     
     /* ===== 4. 近傍補完 (グループ化前なので従来通り動く) =================== */
     edges.forEach(e => {
-        console.log("e", e);
+        // console.log("e", e);
         /* --- source --- */
         if (!e.source) {
             const pos = getAnchorEndpoint(elementMap[e.id], "from");
-            console.log("source edgePos", pos);
+            // console.log("source edgePos", pos);
             
             let best = Infinity, nearest = null;
             for (const nid in nodeRectMap) {
                 const d = dist(nodeRectMap[nid], pos);
                 if (d < best) { best = d; nearest = nid; }
             }
-            console.log("nearest", nearest);
-            console.log("best", best);
+            // console.log("nearest", nearest);
+            // console.log("best", best);
             if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
                 e.source = nearest;
                 connectedNodeIds.add(nearest);
-                console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
+                // console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
             }
         }
         /* --- target --- */
         if (!e.target) {
             const pos = getAnchorEndpoint(elementMap[e.id], "to");
-            console.log("target edgePos", pos);
+            // console.log("target edgePos", pos);
             let best = Infinity, nearest = null;
             for (const nid in nodeRectMap) {
                 const d = dist(nodeRectMap[nid], pos);
                 if (d < best) { best = d; nearest = nid; }
             }
-            console.log("nearest", nearest);
-            console.log("best", best);
+            // console.log("nearest", nearest);
+            // console.log("best", best);
             if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
                 e.target = nearest;
                 connectedNodeIds.add(nearest);
-                console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
+                // console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
             }
         }
     });
