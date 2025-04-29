@@ -71,6 +71,13 @@ if (typeof window.ENABLE_NEARBY_COMPLETION === "undefined") {
     window.ENABLE_NEARBY_COMPLETION = true; // デフォルトは有効
 }
 
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: Type 出力制御フラグ ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.OUTPUT_NODE_TYPE === "undefined") {
+    window.OUTPUT_NODE_TYPE = true; // デフォルトは Type を出力する
+}
+
 /* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
 if (typeof window.NS_MAIN === "undefined") {
     window.NS_MAIN               = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -118,11 +125,13 @@ if (typeof window.formatToTextBySheet === "undefined") {
 
                 data.nodes.forEach(node => {
                     // ▼▼▼ ここから修正 ▼▼▼
+                    const typeInfo = window.OUTPUT_NODE_TYPE ? `Type:${node.type}, ` : ""; // Type情報を条件付きで生成
                     if (node.type === 'group') {
-                        // Type: "group" の場合は ID, Type, GroupID, ParentGroupID のみ出力
+                        // Type: "group" の場合は ID, Type(条件付き), GroupID, ParentGroupID のみ出力
                         const groupInfo   = node.GroupID ? `, GroupID:${node.GroupID}`.replace(/drawing/g, '') : "";
                         const parentGroupInfo = node.ParentGroupID ? `, ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
-                        output += `ID:${node.id}, `.replace(/drawing/g, '') + `Type:${node.type}${groupInfo}${parentGroupInfo}\n`;
+                        // TypeInfo を先頭に追加
+                        output += `ID:${node.id.replace(/drawing/g, '')}, ${typeInfo}${groupInfo}${parentGroupInfo}\n`.replace(/, $/,'\\n'); // 末尾の不要なカンマを削除
                     } else {
                         // Type: "group" 以外の場合 (既存のロジック)
                         const nodeLabel   = node.label || ""; // label が undefined の場合を考慮
@@ -179,9 +188,9 @@ if (typeof window.formatToTextBySheet === "undefined") {
                                 positionInfo = `Row:${midRowInfo}, Col:${midColInfo}`;
                                 break;
                         }
-                        // 出力行の生成 (ParentGroupID を追加)
-                        output += `ID:${node.id}, `.replace(/drawing/g, '') + `Type:${node.type}, ` +
-                                    `Label:"${escaped}"${groupInfo}${parentGroupInfo}, ${positionInfo}\n`; // parentGroupInfo を追加
+                        // 出力行の生成 (ParentGroupID を追加, TypeInfoを条件付きで追加)
+                        output += `ID:${node.id.replace(/drawing/g, '')}, ${typeInfo}` +
+                                    `Label:"${escaped}"${groupInfo}${parentGroupInfo}, ${positionInfo}\n`;
                     }
                     // ▲▲▲ 修正ここまで ▲▲▲
                 });
@@ -197,8 +206,10 @@ if (typeof window.formatToTextBySheet === "undefined") {
                     const escaped   = edgeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
                     // GroupID が null でない場合のみ出力
                     const groupInfo = edge.GroupID ? `, GroupID:${edge.GroupID}`.replace(/drawing/g, '') : "";
+                    // Type情報を条件付きで生成
+                    const typeInfo = window.OUTPUT_NODE_TYPE ? `Type:${edge.type}, ` : "";
                     // エッジには ParentGroupID は通常不要
-                    output += `ID:${edge.id}, Type:${edge.type}, Label:"${escaped}", Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '') + `\n`;
+                    output += `ID:${edge.id.replace(/drawing/g, '')}, ${typeInfo}Label:"${escaped}", Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '').replace(/, $/,'\\n') + `\n`; // 末尾の不要なカンマを削除
                 });
             } else {
                 output += "(No edges extracted for this sheet)\n";
