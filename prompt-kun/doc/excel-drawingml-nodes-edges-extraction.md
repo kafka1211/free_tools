@@ -191,6 +191,263 @@ Excelのグループは階層構造を持つことができます。コードで
 *   **接続補完の精度:** 近傍探索による接続補完は、図形が密集している場合に意図しない接続をする可能性があります。
 *   **テキスト抽出:** 書式情報（色、太字、サイズなど）は失われ、プレーンテキストのみが抽出されます。
 
-### まとめ
+### 8. まとめ
 
 このコードは、Excelの `drawing*.xml` ファイルを解析し、図形 (Node) とコネクタ/直線 (Edge) を抽出するための比較的高度なロジックを実装しています。特に、アンカー情報からの座標計算、EMU単位の扱い、コネクタ接続情報の解析、近傍探索による接続補完、そして2種類のグループ化戦略（階層型 vs 集約型）の選択肢を提供している点が特徴です。Excel DrawingMLの仕様を理解することで、コードの挙動や設定値（定数、フラグ）の意味をより深く把握し、必要に応じたカスタマイズやデバッグが可能になります。
+
+
+### 9. 補足 具体的なXMLサンプルとその解説
+
+Excel の `drawing*.xml` ファイルがどのような構造になっているか、そして提供されたコードがそのXMLをどのように解析して Nodes/Edges 情報を抽出しているかをイメージしやすくするために、具体的なXMLサンプルとその解説を以下に示します。
+
+**注意点:**
+
+*   実際の `drawing*.xml` は、スタイル情報 (色、線種、効果など) や他のプロパティを含み、非常に長くなることがあります。以下のサンプルは、Node/Edge 抽出ロジックの理解に必要な要素に焦点を当て、簡略化しています。
+*   名前空間のプレフィックス (`xdr:`, `a:` など) はファイルによって異なる場合がありますが、通常はこの形式です。
+*   `id` 属性の値はExcelが自動で割り振る数値です。コードではファイル名のプレフィックスを付けて一意性を確保します（例: `drawing1_1`）。
+
+---
+
+**`xl/drawings/drawing1.xml` のサンプル:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <!-- ルート要素: Worksheet Drawing -->
+
+    <!-- ===== 例1: 単純な四角形 (Node) - twoCellAnchor ===== -->
+    <!-- 図形が複数のセル範囲に固定される -->
+    <xdr:twoCellAnchor editAs="oneCell">
+        <!-- 開始位置: 列B (1), 行2 (1) の左上から -->
+        <xdr:from>
+            <xdr:col>1</xdr:col>       <!-- 列インデックス (0始まり) -->
+            <xdr:colOff>0</xdr:colOff> <!-- 列内のオフセット (EMU単位) -->
+            <xdr:row>1</xdr:row>       <!-- 行インデックス (0始まり) -->
+            <xdr:rowOff>0</xdr:rowOff> <!-- 行内のオフセット (EMU単位) -->
+        </xdr:from>
+        <!-- 終了位置: 列D (3), 行4 (3) の途中まで -->
+        <xdr:to>
+            <xdr:col>3</xdr:col>
+            <xdr:colOff>285750</xdr:colOff> <!-- 約 0.47列 -->
+            <xdr:row>3</xdr:row>
+            <xdr:rowOff>95250</xdr:rowOff>  <!-- 約 0.5行 -->
+        </xdr:to>
+        <!-- ▼ 図形本体 (Shape) - これがNodeになる ▼ -->
+        <xdr:sp macro="" textlink="">
+            <!-- 非表示プロパティ (IDなど) -->
+            <xdr:nvSpPr>
+                <!-- ★ コードはここの 'id' を Node ID として使用 (例: drawing1_1) -->
+                <xdr:cNvPr id="1" name="Rectangle 1"/>
+                <xdr:cNvSpPr/> <!-- 図形固有の非表示プロパティ -->
+            </xdr:nvSpPr>
+            <!-- 表示プロパティ (形状、スタイル、テキストなど) -->
+            <xdr:spPr>
+                <!-- ★ 図形の形状 (Preset Geometry) - これが Node の Type になる -->
+                <a:prstGeom prst="rectangle"> <!-- Type: rectangle -->
+                    <a:avLst/> <!-- 調整値リスト (空) -->
+                </a:prstGeom>
+                <!-- ... ここに色、線などのスタイル情報が大量に入る (省略) ... -->
+            </xdr:spPr>
+            <!-- ★ 図形内のテキスト - これが Node の Label になる -->
+            <xdr:txBody>
+                <a:bodyPr/> <!-- テキストボックス全体のプロパティ -->
+                <a:lstStyle/> <!-- リストスタイル (箇条書きなど) -->
+                <a:p> <!-- 段落 (Paragraph) -->
+                    <a:r> <!-- 書式ラン (Run) - 同じ書式のテキストまとまり -->
+                        <a:rPr lang="ja-JP"/> <!-- 言語設定など -->
+                        <a:t>開始ノード</a:t> <!-- ★ テキスト本体 (Label: "開始ノード") -->
+                    </a:r>
+                </a:p>
+            </xdr:txBody>
+        </xdr:sp>
+        <xdr:clientData/> <!-- アプリケーション固有データ -->
+    </xdr:twoCellAnchor>
+
+    <!-- ===== 例2: 円 (Node) - oneCellAnchor ===== -->
+    <!-- 図形が1つのセルに固定され、サイズは絶対値で指定 -->
+    <xdr:oneCellAnchor>
+        <!-- 開始位置: 列F (5), 行2 (1) の途中から -->
+        <xdr:from>
+            <xdr:col>5</xdr:col>
+            <xdr:colOff>95250</xdr:colOff>
+            <xdr:row>1</xdr:row>
+            <xdr:rowOff>47625</xdr:rowOff>
+        </xdr:from>
+        <!-- サイズ (EMU単位) -->
+        <xdr:ext cx="914400" cy="914400"/> <!-- cx:幅, cy:高さ -->
+        <!-- ▼ 図形本体 (Shape) - Node ▼ -->
+        <xdr:sp macro="" textlink="">
+            <xdr:nvSpPr>
+                <!-- ★ Node ID: drawing1_2 -->
+                <xdr:cNvPr id="2" name="Oval 2"/>
+                <xdr:cNvSpPr/>
+            </xdr:nvSpPr>
+            <xdr:spPr>
+                <!-- ★ Node Type: ellipse -->
+                <a:prstGeom prst="ellipse">
+                    <a:avLst/>
+                </a:prstGeom>
+                <!-- ... スタイル情報 (省略) ... -->
+            </xdr:spPr>
+            <!-- ★ Node Label: "終了ノード" -->
+            <xdr:txBody>
+                <a:bodyPr/> <a:lstStyle/>
+                <a:p><a:r><a:t>終了ノード</a:t></a:r></a:p>
+            </xdr:txBody>
+        </xdr:sp>
+        <xdr:clientData/>
+    </xdr:oneCellAnchor>
+
+    <!-- ===== 例3: コネクタ (Edge) - 開始ノードと終了ノードを接続 ===== -->
+    <xdr:twoCellAnchor> <!-- コネクタ自身もアンカー内に配置されるが、経路を示すためのもので接続とは直接関係ない -->
+        <xdr:from>
+            <xdr:col>2</xdr:col> <xdr:colOff>0</xdr:colOff>
+            <xdr:row>2</xdr:row> <xdr:rowOff>0</xdr:rowOff>
+        </xdr:from>
+        <xdr:to>
+            <xdr:col>5</xdr:col> <xdr:colOff>0</xdr:colOff>
+            <xdr:row>2</xdr:row> <xdr:rowOff>0</xdr:rowOff>
+        </xdr:to>
+        <!-- ▼ コネクタ本体 (Connection Shape) - これがEdgeになる ▼ -->
+        <xdr:cxnSp macro="" textlink="">
+            <!-- 非表示プロパティ (ID、接続情報) -->
+            <xdr:nvCxnSpPr>
+                <!-- ★ Edge ID: drawing1_3 -->
+                <xdr:cNvPr id="3" name="Bent Connector 3"/>
+                <!-- ★ コネクタ固有の非表示プロパティ (接続情報) -->
+                <xdr:cNvCxnSpPr>
+                    <!-- ★ 始点接続情報 (Start Connection) -->
+                    <!-- 'id' 属性が接続先の Node ID (数値) を示す -->
+                    <a:stCxn id="1" idx="3"/> <!-- ★ Source: Node ID 1 -->
+                    <!-- ★ 終点接続情報 (End Connection) -->
+                    <a:endCxn id="2" idx="1"/> <!-- ★ Target: Node ID 2 -->
+                </xdr:cNvCxnSpPr>
+            </xdr:nvCxnSpPr>
+            <!-- 表示プロパティ (形状、スタイル) -->
+            <xdr:spPr>
+                <!-- ★ コネクタの形状 - これが Edge の Type になる -->
+                <a:prstGeom prst="bentConnector3"> <!-- Type: bentConnector3 -->
+                    <a:avLst/>
+                </a:prstGeom>
+                <!-- ... 線のスタイル情報 (省略) ... -->
+            </xdr:spPr>
+            <!-- コネクタにテキストが付く場合 (稀) -->
+            <!-- <xdr:txBody> ... </xdr:txBody> -->
+        </xdr:cxnSp>
+        <xdr:clientData/>
+    </xdr:twoCellAnchor>
+
+     <!-- ===== 例4: グループ化された図形 ===== -->
+    <xdr:twoCellAnchor> <!-- グループ全体のアンカー -->
+        <xdr:from>
+            <xdr:col>1</xdr:col> <xdr:row>5</xdr:row>
+            <!-- ... (省略) ... -->
+        </xdr:from>
+        <xdr:to>
+            <xdr:col>4</xdr:col> <xdr:row>8</xdr:row>
+            <!-- ... (省略) ... -->
+        </xdr:to>
+        <!-- ▼ グループ本体 (Group Shape) ▼ -->
+        <xdr:grpSp>
+            <xdr:nvGrpSpPr>
+                 <!-- ★ グループ自体のID (旧ロジックのGroup Node ID / 新ロジックの groupAggregation Node ID) -->
+                <xdr:cNvPr id="10" name="Group 10"/>
+                <xdr:cNvGrpSpPr/> <!-- グループ固有の非表示プロパティ -->
+            </xdr:nvGrpSpPr>
+            <xdr:grpSpPr> <!-- グループ全体の表示プロパティ (位置、サイズなど) -->
+                <a:xfrm> <!-- グループ内の子要素に対する変換情報 -->
+                    <!-- ... (省略) ... -->
+                </a:xfrm>
+            </xdr:grpSpPr>
+
+            <!-- ▼ グループ内の図形1 (Node) ▼ -->
+            <xdr:sp>
+                <xdr:nvSpPr>
+                    <!-- ★ Node ID: drawing1_11 -->
+                    <!-- 【旧ロジック】このNodeは GroupID=drawing1_10 を持つ -->
+                    <!-- 【新ロジック】このNodeは削除され、情報は groupAggregation(ID:10) に集約される -->
+                    <xdr:cNvPr id="11" name="Rectangle 11"/>
+                </xdr:nvSpPr>
+                <xdr:spPr><a:prstGeom prst="roundRectangle"/></xdr:spPr>
+                <xdr:txBody><a:p><a:r><a:t>要素 A</a:t></a:r></a:p></xdr:txBody> <!-- 新ロジックでの集約対象 -->
+            </xdr:sp>
+
+            <!-- ▼ グループ内の図形2 (Node) ▼ -->
+            <xdr:sp>
+                <xdr:nvSpPr>
+                    <!-- ★ Node ID: drawing1_12 -->
+                    <xdr:cNvPr id="12" name="Triangle 12"/>
+                </xdr:nvSpPr>
+                <xdr:spPr><a:prstGeom prst="triangle"/></xdr:spPr>
+                <xdr:txBody><a:p><a:r><a:t>要素 B</a:t></a:r></a:p></xdr:txBody> <!-- 新ロジックでの集約対象 -->
+            </xdr:sp>
+
+            <!-- ▼ グループ内のコネクタ (Edge) - 要素Aと要素Bを接続 ▼ -->
+            <xdr:cxnSp>
+                <xdr:nvCxnSpPr>
+                    <!-- ★ Edge ID: drawing1_13 -->
+                    <xdr:cNvPr id="13" name="Connector 13"/>
+                    <xdr:cNvCxnSpPr>
+                        <a:stCxn id="11" idx="1"/> <!-- Source: drawing1_11 -->
+                        <a:endCxn id="12" idx="1"/> <!-- Target: drawing1_12 -->
+                         <!-- 【旧ロジック】このEdgeは GroupID=drawing1_10 を持つ -->
+                         <!-- 【新ロジック】Source/Targetが groupAggregation(ID:10) に付け替えられる -->
+                    </xdr:cNvCxnSpPr>
+                </xdr:nvCxnSpPr>
+                 <xdr:spPr><a:prstGeom prst="straightConnector1"/></xdr:spPr>
+            </xdr:cxnSp>
+
+        </xdr:grpSp> <!-- グループ要素終了 -->
+        <xdr:clientData/>
+    </xdr:twoCellAnchor>
+
+    <!-- ===== 例5: 単純な直線 (Edgeとして近傍補完対象) ===== -->
+     <xdr:twoCellAnchor>
+        <xdr:from> <!-- 直線の始点 -->
+            <xdr:col>1</xdr:col> <xdr:colOff>200000</xdr:colOff>
+            <xdr:row>4</xdr:row> <xdr:rowOff>100000</xdr:rowOff>
+        </xdr:from>
+        <xdr:to> <!-- 直線の終点 -->
+            <xdr:col>2</xdr:col> <xdr:colOff>50000</xdr:colOff>
+            <xdr:row>5</xdr:row> <xdr:rowOff>20000</xdr:rowOff>
+        </xdr:to>
+        <!-- ▼ 直線も <xdr:sp> 要素で表現される ▼ -->
+        <xdr:sp macro="" textlink="">
+            <xdr:nvSpPr>
+                <!-- ★ Edge ID: drawing1_4 -->
+                <xdr:cNvPr id="4" name="Line 4"/>
+            </xdr:nvSpPr>
+            <xdr:spPr>
+                <!-- ★ Edge Type: line -->
+                <a:prstGeom prst="line">
+                    <a:avLst/>
+                </a:prstGeom>
+                 <!-- ★★★ 直線要素には、コネクタのような明示的な接続情報 (<a:stCxn>, <a:endCxn>) は無い ★★★ -->
+                 <!-- ★★★ コードは、この直線の from/to 座標と他のNodeの矩形を比較し、近ければ接続を補完する ★★★ -->
+            </xdr:spPr>
+        </xdr:sp>
+        <xdr:clientData/>
+    </xdr:twoCellAnchor>
+
+</xdr:wsDr>
+```
+
+---
+
+**コードによる解析の流れ (上記サンプルに対応):**
+
+1.  **ファイル読み込み:** `extractStructuredShapesFromExcel` が `drawing1.xml` を読み込み、`extractStructure` に渡します。プレフィックスは `drawing1` となります。
+2.  **1stパス:**
+    *   `xdr:sp` (ID: 1, 2, 11, 12) を発見 → `processShapeBase` で Node オブジェクト生成 (ID: `drawing1_1`, `drawing1_2`, `drawing1_11`, `drawing1_12`)。`type`, `label` を抽出。
+    *   `xdr:sp` (ID: 4) を発見 → `prst="line"` なので `processLineShape` で Edge オブジェクト生成 (ID: `drawing1_4`, Type: `line`, Source/Target: `null`)。
+    *   `xdr:cxnSp` (ID: 3, 13) を発見 → `processConnectorBase` で Edge オブジェクト生成 (ID: `drawing1_3`, `drawing1_13`)。`type` を抽出し、`stCxn`/`endCxn` から `source`/`target` を設定 (例: Edge 3 の Source=`drawing1_1`, Target=`drawing1_2`)。
+    *   `xdr:grpSp` (ID: 10) を発見 → グループ要素として一時リストに保持。
+3.  **座標取得:** 各 Node (ID 1, 2, 11, 12) について、親アンカーの `from`/`to` 要素から `getAnchorEndpoint` で `fromRow/Col`, `toRow/Col` を計算し、Node オブジェクトと `nodeRectMap` に格納。
+4.  **近傍補完:** Edge 4 (直線) の `from`/`to` 座標を `getAnchorEndpoint` で計算。Node 1, 2, 11, 12 の矩形 (`nodeRectMap`) との距離を比較。もし `NEAR_SHAPE_THRESHOLD` 内に Node 1 やグループ (ID 10) の矩形があれば、Edge 4 の `source` や `target` が設定される可能性があります。
+5.  **グループ処理 (`USE_LEGACY_GROUPING_LOGIC` による分岐):**
+    *   **旧 (`true`):** `type="group"`, `id="drawing1_10"` のNode生成。Node 11, 12, Edge 13 に `GroupID="drawing1_10"` 付与。
+    *   **新 (`false`):** `type="groupAggregation"`, `id="drawing1_10"` のNode生成。Label は `"要素 A\n要素 B"` (区切り文字依存)。Node 11, 12 を削除。Edge 13 の Source/Target を `drawing1_10` に変更。Node 10 の座標を Node 11, 12 の範囲で計算。
+6.  **フィルタリング:** 自己ループや存在しないNodeへの接続を持つEdgeを除去 (新ロジックの場合、Edge 13 が自己ループになるため除去される可能性)。
+7.  **テキスト整形:** `formatToTextBySheet` が最終的なNodes/Edgesリストを整形して出力。
