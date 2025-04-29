@@ -64,6 +64,13 @@ if (typeof window.USE_LEGACY_GROUPING_LOGIC === "undefined") {
     window.USE_LEGACY_GROUPING_LOGIC = false; // デフォルトは新しいロジック (親集約)
 }
 
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: 近傍補完の有効/無効切り替え ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.ENABLE_NEARBY_COMPLETION === "undefined") {
+    window.ENABLE_NEARBY_COMPLETION = true; // デフォルトは有効
+}
+
 /* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
 if (typeof window.NS_MAIN === "undefined") {
     window.NS_MAIN               = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -572,55 +579,57 @@ function extractStructure(xmlDoc, drawingPath) {
     });
 
     /* ===== 4. 近傍補完 (グループ化前) =================================== */
-    // edges 配列内のコネクタ (cxnSp または line sp) に対して実行
-    edges.forEach(e => {
-        const edgeElement = elementMap[e.id]; // cxnSp または line sp 要素を取得
-        if (!edgeElement) return;
+    if (window.ENABLE_NEARBY_COMPLETION) { // ★★ 追加: フラグで処理を囲む
+        // edges 配列内のコネクタ (cxnSp または line sp) に対して実行
+        edges.forEach(e => {
+            const edgeElement = elementMap[e.id]; // cxnSp または line sp 要素を取得
+            if (!edgeElement) return;
 
-        /* --- source --- */
-        if (!e.source) {
-            const pos = getAnchorEndpoint(edgeElement, "from");
-            // console.log("source edgePos", pos);
+            /* --- source --- */
+            if (!e.source) {
+                const pos = getAnchorEndpoint(edgeElement, "from");
+                // console.log("source edgePos", pos);
 
-            let best = Infinity, nearest = null;
-            // 接続先候補は sp 由来のノードのみとする (nodeRectMap にはその矩形のみが存在)
-            for (const nid in nodeRectMap) {
-                 const nodeElement = elementMap[nid];
-                 // 接続候補が sp であること、かつ矩形情報が存在することを確認
-                 if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
-                     const d = dist(nodeRectMap[nid], pos);
-                     if (d < best) { best = d; nearest = nid; }
-                 }
-            }
-            // console.log("nearest", nearest);
-            // console.log("best", best);
-            if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
-                e.source = nearest;
-                connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
-                // console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
-            }
-        }
-        /* --- target --- */
-        if (!e.target) {
-            const pos = getAnchorEndpoint(edgeElement, "to");
-            // console.log("target edgePos", pos);
-            let best = Infinity, nearest = null;
-            for (const nid in nodeRectMap) {
-                 const nodeElement = elementMap[nid];
-                 if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
-                    const d = dist(nodeRectMap[nid], pos);
-                    if (d < best) { best = d; nearest = nid; }
+                let best = Infinity, nearest = null;
+                // 接続先候補は sp 由来のノードのみとする (nodeRectMap にはその矩形のみが存在)
+                for (const nid in nodeRectMap) {
+                     const nodeElement = elementMap[nid];
+                     // 接続候補が sp であること、かつ矩形情報が存在することを確認
+                     if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
+                         const d = dist(nodeRectMap[nid], pos);
+                         if (d < best) { best = d; nearest = nid; }
+                     }
+                }
+                // console.log("nearest", nearest);
+                // console.log("best", best);
+                if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
+                    e.source = nearest;
+                    connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
+                    // console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
                 }
             }
-            // console.log("nearest", nearest);
-            // console.log("best", best);
-            if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
-                e.target = nearest;
-                connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
-                // console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
+            /* --- target --- */
+            if (!e.target) {
+                const pos = getAnchorEndpoint(edgeElement, "to");
+                // console.log("target edgePos", pos);
+                let best = Infinity, nearest = null;
+                for (const nid in nodeRectMap) {
+                     const nodeElement = elementMap[nid];
+                     if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
+                        const d = dist(nodeRectMap[nid], pos);
+                        if (d < best) { best = d; nearest = nid; }
+                    }
+                }
+                // console.log("nearest", nearest);
+                // console.log("best", best);
+                if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
+                    e.target = nearest;
+                    connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
+                    // console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
+                }
             }
-        }
-    });
+        });
+    } // ★★ 追加: フラグで処理を囲む
 
     /* ===== 5. グループ処理 (ロジック切り替え) ============================ */
     if (window.USE_LEGACY_GROUPING_LOGIC) {
