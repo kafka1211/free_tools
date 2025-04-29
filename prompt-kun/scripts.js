@@ -9,10 +9,10 @@ if (typeof window.GROUP_LABEL_SEPARATOR === "undefined") {
 
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加: ノード位置出力モード ★★
-    1: from/to の4点, 2: 中点 (デフォルト), 3: from のみ
+    1: from/to の4点, 2: 中点, 3: from のみ
     ………………………………………………………………………………………………………………………… */
 if (typeof window.NODE_POSITION_OUTPUT_MODE === "undefined") {
-    window.NODE_POSITION_OUTPUT_MODE = 1; // デフォルトは中点
+    window.NODE_POSITION_OUTPUT_MODE = 1;
 }
 
 /*  …………………………………………………………………………………………………………………………
@@ -58,24 +58,31 @@ if (typeof window.DEFAULT_COL_WIDTH_EMU === "undefined") {
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加: グループID付与ロジック切り替え ★★
     true: 旧ロジック (要素ごとに親のgrpSpを探してgroupIdを付与),
-    false: 新ロジック (grpSpによる親集約、デフォルト)
+    false: 新ロジック (grpSpによる親集約)
     ………………………………………………………………………………………………………………………… */
 if (typeof window.USE_LEGACY_GROUPING_LOGIC === "undefined") {
-    window.USE_LEGACY_GROUPING_LOGIC = false; // デフォルトは新しいロジック (親集約)
+    window.USE_LEGACY_GROUPING_LOGIC = false;
 }
 
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加: 近傍補完の有効/無効切り替え ★★
     ………………………………………………………………………………………………………………………… */
 if (typeof window.ENABLE_NEARBY_COMPLETION === "undefined") {
-    window.ENABLE_NEARBY_COMPLETION = true; // デフォルトは有効
+    window.ENABLE_NEARBY_COMPLETION = true;
 }
 
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加: Type 出力制御フラグ ★★
     ………………………………………………………………………………………………………………………… */
 if (typeof window.OUTPUT_NODE_TYPE === "undefined") {
-    window.OUTPUT_NODE_TYPE = true; // デフォルトは Type を出力する
+    window.OUTPUT_NODE_TYPE = false;
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: 空ノードへの接続を覆うノードへ付け替える機能のスイッチ ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.ENABLE_CONNECTOR_RETARGETING === "undefined") {
+    window.ENABLE_CONNECTOR_RETARGETING = true;
 }
 
 /* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
@@ -128,8 +135,8 @@ if (typeof window.formatToTextBySheet === "undefined") {
                     const typeInfo = window.OUTPUT_NODE_TYPE ? `Type:${node.type}, ` : ""; // Type情報を条件付きで生成
                     if (node.type === 'group') {
                         // Type: "group" の場合は ID, Type(条件付き), GroupID, ParentGroupID のみ出力
-                        const groupInfo   = node.GroupID ? `, GroupID:${node.GroupID}`.replace(/drawing/g, '') : "";
-                        const parentGroupInfo = node.ParentGroupID ? `, ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
+                        const groupInfo   = node.GroupID ? `GroupID:${node.GroupID}, `.replace(/drawing/g, '') : "";
+                        const parentGroupInfo = node.ParentGroupID ? `ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
                         // TypeInfo を先頭に追加
                         output += `ID:${node.id.replace(/drawing/g, '')}, ${typeInfo}${groupInfo}${parentGroupInfo}\n`.replace(/, $/,'\\n'); // 末尾の不要なカンマを削除
                     } else {
@@ -209,7 +216,7 @@ if (typeof window.formatToTextBySheet === "undefined") {
                     // Type情報を条件付きで生成
                     const typeInfo = window.OUTPUT_NODE_TYPE ? `Type:${edge.type}, ` : "";
                     // エッジには ParentGroupID は通常不要
-                    output += `ID:${edge.id.replace(/drawing/g, '')}, ${typeInfo}Label:"${escaped}", Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '').replace(/, $/,'\\n') + `\n`; // 末尾の不要なカンマを削除
+                    output += `ID:${edge.id.replace(/drawing/g, '')}, ${typeInfo}Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '').replace(/, $/,'\\n') + `\n`; // 末尾の不要なカンマを削除
                 });
             } else {
                 output += "(No edges extracted for this sheet)\n";
@@ -589,8 +596,8 @@ function extractStructure(xmlDoc, drawingPath) {
         }
     });
 
-    /* ===== 4. 近傍補完 (グループ化前) =================================== */
-    if (window.ENABLE_NEARBY_COMPLETION) { // ★★ 追加: フラグで処理を囲む
+    /* ===== 4. 近傍補完 =================================== */
+    if (window.ENABLE_NEARBY_COMPLETION) {
         // edges 配列内のコネクタ (cxnSp または line sp) に対して実行
         edges.forEach(e => {
             const edgeElement = elementMap[e.id]; // cxnSp または line sp 要素を取得
@@ -640,7 +647,7 @@ function extractStructure(xmlDoc, drawingPath) {
                 }
             }
         });
-    } // ★★ 追加: フラグで処理を囲む
+    }
 
     /* ===== 5. グループ処理 (ロジック切り替え) ============================ */
     if (window.USE_LEGACY_GROUPING_LOGIC) {
@@ -775,10 +782,99 @@ function extractStructure(xmlDoc, drawingPath) {
         }
     } // <-- End of if/else (grouping logic)
 
-    /* ===== 6. 自己ループ・幽霊端点を除去 ================================ */
+    /* ===== 5-B. ★★ 追加: 空ノードへの接続を包含ノードへ付け替え ★★ ===== */
+    if (window.ENABLE_CONNECTOR_RETARGETING) {
+        // console.log("[INFO] Applying connector retargeting logic.");
+
+        // nodes 配列を ID で検索できるように Map を作成
+        const nodesById = new Map(nodes.map(n => [n.id, n]));
+
+        edges.forEach(edge => {
+            // --- Source 側の付け替えチェック ---
+            if (edge.source) {
+                const sourceNode = nodesById.get(edge.source);
+                // ソースノードが存在し、テキストが空で、座標が有効な場合
+                if (sourceNode && !sourceNode.hasText &&
+                    Number.isFinite(sourceNode.fromRow) && Number.isFinite(sourceNode.fromCol) &&
+                    Number.isFinite(sourceNode.toRow)   && Number.isFinite(sourceNode.toCol))
+                {
+                    let coveringNode = null;
+                    // 他の全てのノードをチェック
+                    for (const potentialParentNode of nodes) {
+                        // 自分自身、テキストが空、座標が無効なノードはスキップ
+                        if (potentialParentNode.id === sourceNode.id || !potentialParentNode.hasText ||
+                            !Number.isFinite(potentialParentNode.fromRow) || !Number.isFinite(potentialParentNode.fromCol) ||
+                            !Number.isFinite(potentialParentNode.toRow)   || !Number.isFinite(potentialParentNode.toCol))
+                        {
+                            continue;
+                        }
+
+                        // 包含関係をチェック (potentialParentNode が sourceNode を覆うか)
+                        if (potentialParentNode.fromRow <= sourceNode.fromRow &&
+                            potentialParentNode.fromCol <= sourceNode.fromCol &&
+                            potentialParentNode.toRow   >= sourceNode.toRow   &&
+                            potentialParentNode.toCol   >= sourceNode.toCol)
+                        {
+                            // 最初に見つかった包含ノードを採用 (より洗練させるなら面積比較など)
+                            coveringNode = potentialParentNode;
+                            break;
+                        }
+                    }
+
+                    // 覆うノードが見つかった場合、接続先を付け替え
+                    if (coveringNode) {
+                        // console.log(`[RETARGET] Edge ${edge.id} source: ${edge.source} (blank) -> ${coveringNode.id} (covering)`);
+                        edge.source = coveringNode.id;
+                        connectedNodeIds.delete(sourceNode.id); // 元の空ノードへの接続参照を削除
+                        connectedNodeIds.add(coveringNode.id); // 新しい接続先を追加
+                    }
+                }
+            }
+
+            // --- Target 側の付け替えチェック (Source側と同様のロジック) ---
+            if (edge.target) {
+                const targetNode = nodesById.get(edge.target);
+                // ターゲットノードが存在し、テキストが空で、座標が有効な場合
+                if (targetNode && !targetNode.hasText &&
+                    Number.isFinite(targetNode.fromRow) && Number.isFinite(targetNode.fromCol) &&
+                    Number.isFinite(targetNode.toRow)   && Number.isFinite(targetNode.toCol))
+                {
+                    let coveringNode = null;
+                    for (const potentialParentNode of nodes) {
+                        if (potentialParentNode.id === targetNode.id || !potentialParentNode.hasText ||
+                            !Number.isFinite(potentialParentNode.fromRow) || !Number.isFinite(potentialParentNode.fromCol) ||
+                            !Number.isFinite(potentialParentNode.toRow)   || !Number.isFinite(potentialParentNode.toCol))
+                        {
+                            continue;
+                        }
+                        if (potentialParentNode.fromRow <= targetNode.fromRow &&
+                            potentialParentNode.fromCol <= targetNode.fromCol &&
+                            potentialParentNode.toRow   >= targetNode.toRow   &&
+                            potentialParentNode.toCol   >= targetNode.toCol)
+                        {
+                            coveringNode = potentialParentNode;
+                            break;
+                        }
+                    }
+                    if (coveringNode) {
+                        // console.log(`[RETARGET] Edge ${edge.id} target: ${edge.target} (blank) -> ${coveringNode.id} (covering)`);
+                        edge.target = coveringNode.id;
+                        connectedNodeIds.delete(targetNode.id);
+                        connectedNodeIds.add(coveringNode.id);
+                    }
+                }
+            }
+        });
+    }
+
+    // console.log("[DEBUG] nodes", nodes);
+    // console.log("[DEBUG] edges", edges);
+    // console.log("[DEBUG] connectedNodeIds", connectedNodeIds);
+
+    /* ===== 6. 幽霊端点を除去 ================================ */
     for (let i = edges.length - 1; i >= 0; i--) {
         const e = edges[i];
-        if (!e.source || !e.target || e.source === e.target) { edges.splice(i, 1); continue; }
+        if (!e.source || !e.target) { edges.splice(i, 1); continue; }
         // nodes 配列に存在するIDかチェック (sp, group, groupAggregation が含まれる)
         const sourceExists = nodes.some(n => n.id === e.source);
         const targetExists = nodes.some(n => n.id === e.target);
@@ -787,13 +883,14 @@ function extractStructure(xmlDoc, drawingPath) {
 
     /* ===== 7. 最終フィルタリング ======================================= */
     const finalNodes = nodes.filter(n =>
-        //(n.type === "group" || true) &&
-        //!(!n.hasText && !connectedNodeIds.has(n.id))
-        true
+        !(!n.hasText && !connectedNodeIds.has(n.id))
     );
     const finalEdges = edges.filter(e =>
         (true)
     );
+
+    // console.log("[DEBUG] finalNodes", finalNodes);
+    // console.log("[DEBUG] finalEdges", finalEdges);
 
     return { nodes: finalNodes, edges: finalEdges };
 }    
