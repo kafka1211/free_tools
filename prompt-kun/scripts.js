@@ -1,11 +1,36 @@
 /*  ▼ 既に定義済みであれば再宣言を避けるため typeof チェックを入れる */
 
 /*  …………………………………………………………………………………………………………………………
+    ★★ 追加: グループラベル結合用区切り文字 ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.GROUP_LABEL_SEPARATOR === "undefined") {
+    window.GROUP_LABEL_SEPARATOR = "\\n"; // グループ化されたラベルの区切り文字
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: ノード位置出力モード ★★
+    1: from/to の4点, 2: 中点 (デフォルト), 3: from のみ
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.NODE_POSITION_OUTPUT_MODE === "undefined") {
+    window.NODE_POSITION_OUTPUT_MODE = 1; // デフォルトは中点
+}
+
+/*  …………………………………………………………………………………………………………………………
     ★★ 追加: 近傍自動コネクト用しきい値 (ユークリッド) ★★
     ………………………………………………………………………………………………………………………… */
 if (typeof window.NEAR_SHAPE_THRESHOLD === "undefined") {
     /* 2以内なら自動で接続 – 必要に応じて変更可 */
     window.NEAR_SHAPE_THRESHOLD = 2;
+}
+
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: 座標表示用係数 ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.ROW_COORD_MULTIPLIER === "undefined") {
+    window.ROW_COORD_MULTIPLIER = 1; // 行座標の表示係数 (デフォルト: 1)
+}
+if (typeof window.COL_COORD_MULTIPLIER === "undefined") {
+    window.COL_COORD_MULTIPLIER = 1; // 列座標の表示係数 (デフォルト: 1)
 }
 
 /*  …………………………………………………………………………………………………………………………
@@ -30,8 +55,14 @@ if (typeof window.DEFAULT_COL_WIDTH_EMU === "undefined") {
     window.DEFAULT_COL_WIDTH_EMU = window.EMU_PER_PIXEL * window.DEFAULT_COL_WIDTH_PX;   /* 609 600 EMU */
 }
 
-
-
+/*  …………………………………………………………………………………………………………………………
+    ★★ 追加: グループID付与ロジック切り替え ★★
+    true: 旧ロジック (要素ごとに親のgrpSpを探してgroupIdを付与),
+    false: 新ロジック (grpSpによる親集約、デフォルト)
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.USE_LEGACY_GROUPING_LOGIC === "undefined") {
+    window.USE_LEGACY_GROUPING_LOGIC = false; // デフォルトは新しいロジック (親集約)
+}
 
 /* ---------- Excel DrawingML 用 名前空間定義 (グローバル) ---------- */
 if (typeof window.NS_MAIN === "undefined") {
@@ -51,7 +82,6 @@ if (typeof window.NS_SPREADSHEETDRAWING === "undefined") {
 if (typeof window.__CXN_AUTO_ID === "undefined") {
     window.__CXN_AUTO_ID = 0;
 }
-
 
 /*  …………………………………………………………………………………………………………………………
     ★★ 追加箇所 0-B :  抽出結果をシート別の構造化テキストへ整形  ★★
@@ -76,14 +106,77 @@ if (typeof window.formatToTextBySheet === "undefined") {
             /* ---------- Nodes ---------- */
             output += "--- NODES ---\n";
             if (data.nodes.length > 0) {
+                // 座標値をフォーマットするヘルパー関数 (係数適用は呼び出し元で行う)
+                const formatCoord = (val) => (val !== null && val !== undefined && Number.isFinite(val)) ? Math.round(val) : "inf";
+
                 data.nodes.forEach(node => {
-                    const nodeLabel   = node.label;
-                    const escaped     = nodeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
-                    const groupInfo   = node.groupId ? `, GroupID:${node.groupId}`.replace(/drawing/g, '') : "";
-                    const rowInfo     = (node.row !== null && node.row !== undefined && Number.isFinite(node.row)) ? node.row : "inf";
-                    const colInfo     = (node.col !== null && node.col !== undefined && Number.isFinite(node.col)) ? node.col : "inf";
-                    output += `ID:${node.id}, `.replace(/drawing/g, '') +
-                                `Label:"${escaped}"${groupInfo}, Row:${rowInfo}, Col:${colInfo}\n`;
+                    // ▼▼▼ ここから修正 ▼▼▼
+                    if (node.type === 'group') {
+                        // Type: "group" の場合は ID, Type, GroupID, ParentGroupID のみ出力
+                        const groupInfo   = node.GroupID ? `, GroupID:${node.GroupID}`.replace(/drawing/g, '') : "";
+                        const parentGroupInfo = node.ParentGroupID ? `, ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
+                        output += `ID:${node.id}, `.replace(/drawing/g, '') + `Type:${node.type}${groupInfo}${parentGroupInfo}\n`;
+                    } else {
+                        // Type: "group" 以外の場合 (既存のロジック)
+                        const nodeLabel   = node.label || ""; // label が undefined の場合を考慮
+                        const escaped     = nodeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
+                        // GroupID が null でない場合のみ出力
+                        const groupInfo   = node.GroupID ? `, GroupID:${node.GroupID}`.replace(/drawing/g, '') : "";
+                        // ★★ ParentGroupID が null でない場合のみ出力 ★★
+                        const parentGroupInfo = node.ParentGroupID ? `, ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
+
+                        // 位置情報の出力部分をモードに応じて切り替え
+                        let positionInfo = "";
+                        // node.type === 'groupAggregation' など他のタイプでは座標を出力する
+                        switch (window.NODE_POSITION_OUTPUT_MODE) {
+                            case 1: // from/to の4点
+                                // 係数を適用してからフォーマット
+                                const fromRow = node.fromRow * window.ROW_COORD_MULTIPLIER;
+                                const fromCol = node.fromCol * window.COL_COORD_MULTIPLIER;
+                                const toRow   = node.toRow   * window.ROW_COORD_MULTIPLIER;
+                                const toCol   = node.toCol   * window.COL_COORD_MULTIPLIER;
+                                const fromRowInfo = formatCoord(fromRow);
+                                const fromColInfo = formatCoord(fromCol);
+                                const toRowInfo   = formatCoord(toRow);
+                                const toColInfo   = formatCoord(toCol);
+                                positionInfo = `RowFrom:${fromRowInfo}, ColFrom:${fromColInfo}, RowTo:${toRowInfo}, ColTo:${toColInfo}`;
+                                break;
+                            case 3: // from のみ
+                                // 係数を適用してからフォーマット
+                                const fRow = node.fromRow * window.ROW_COORD_MULTIPLIER;
+                                const fCol = node.fromCol * window.COL_COORD_MULTIPLIER;
+                                const fRowInfo = formatCoord(fRow);
+                                const fColInfo = formatCoord(fCol);
+                                positionInfo = `Row:${fRowInfo}, Col:${fColInfo}`;
+                                break;
+                            case 2: // 中点 (デフォルト)
+                            default:
+                                let rowMid, colMid;
+                                // from/to が両方有効な場合のみ中点を計算
+                                if (Number.isFinite(node.fromRow) && Number.isFinite(node.toRow)) {
+                                    rowMid = (node.fromRow + node.toRow) / 2;
+                                } else {
+                                    // 片方でも Infinity なら、有効な方を採用 (両方 Infinity なら Infinity)
+                                    rowMid = Number.isFinite(node.fromRow) ? node.fromRow : node.toRow;
+                                }
+                                if (Number.isFinite(node.fromCol) && Number.isFinite(node.toCol)) {
+                                    colMid = (node.fromCol + node.toCol) / 2;
+                                } else {
+                                    colMid = Number.isFinite(node.fromCol) ? node.fromCol : node.toCol;
+                                }
+                                // 係数を適用してからフォーマット
+                                const midRow = rowMid * window.ROW_COORD_MULTIPLIER;
+                                const midCol = colMid * window.COL_COORD_MULTIPLIER;
+                                const midRowInfo = formatCoord(midRow);
+                                const midColInfo = formatCoord(midCol);
+                                positionInfo = `Row:${midRowInfo}, Col:${midColInfo}`;
+                                break;
+                        }
+                        // 出力行の生成 (ParentGroupID を追加)
+                        output += `ID:${node.id}, `.replace(/drawing/g, '') + `Type:${node.type}, ` +
+                                    `Label:"${escaped}"${groupInfo}${parentGroupInfo}, ${positionInfo}\n`; // parentGroupInfo を追加
+                    }
+                    // ▲▲▲ 修正ここまで ▲▲▲
                 });
             } else {
                 output += "(No nodes extracted for this sheet)\n";
@@ -93,10 +186,12 @@ if (typeof window.formatToTextBySheet === "undefined") {
             output += "\n--- EDGES ---\n";
             if (data.edges.length > 0) {
                 data.edges.forEach(edge => {
-                    const edgeLabel = edge.label;
+                    const edgeLabel = edge.label || ""; // label が undefined の場合を考慮
                     const escaped   = edgeLabel.replace(/"/g, '""').replace(/\r?\n/g, "\\n");
-                    const groupInfo = edge.groupId ? `, GroupID:${edge.groupId}`.replace(/drawing/g, '') : "";
-                    output += `ID:${edge.id}, Source:${edge.source}, Target:${edge.target}`.replace(/drawing/g, '') + `\n`;
+                    // GroupID が null でない場合のみ出力
+                    const groupInfo = edge.GroupID ? `, GroupID:${edge.GroupID}`.replace(/drawing/g, '') : "";
+                    // エッジには ParentGroupID は通常不要
+                    output += `ID:${edge.id}, Type:${edge.type}, Label:"${escaped}", Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '') + `\n`;
                 });
             } else {
                 output += "(No edges extracted for this sheet)\n";
@@ -363,16 +458,34 @@ function getAnchorEndpoint(elem, endpoint /* 'from' | 'to' */) {
     return { row, col };
 }
 
+/* Helper function to find the closest parent grpSp ID */
+function findParentGroupId(element, prefix) {
+    try {
+        let p = element.parentElement;
+        while (p) {
+            if (p.namespaceURI === window.NS_SPREADSHEETDRAWING && p.localName === "grpSp") {
+                // Found the closest parent grpSp, return its ID
+                const parentGrpId = getGroupId(p, prefix); // getGroupId should handle cases where ID is missing
+                return parentGrpId;
+            }
+            p = p.parentElement;
+        }
+    } catch (e) {
+        console.error("[findParentGroupId] Error:", e, "Element:", element);
+    }
+    return null; // No parent grpSp found
+}
+
 /* ---------- drawing.xml から nodes / edges を抽出 ---------- */
 function extractStructure(xmlDoc, drawingPath) {
 
     /* ===== 0. 初期セットアップ ========================================== */
     const nodes            = [];
     const edges            = [];
-    const elementMap       = {};
-    const connectedNodeIds = new Set();
+    const elementMap       = {}; // elementMap には sp, cxnSp, grpSp をすべて入れる
+    const connectedNodeIds = new Set(); // これは近傍補完で使う
     const prefix           = drawingPath.split("/").pop().replace(".xml", "");
-    
+
     /* ===== 1. 距離関数 (長方形–点 最短距離) ============================== */
     const dist = (rect, p) => {
         // console.log("rect", rect);
@@ -386,175 +499,272 @@ function extractStructure(xmlDoc, drawingPath) {
         // console.log("dy", dy);
         return Math.sqrt(dx * dx + dy * dy);
     };
-    
-    /* ===== 2. 1st パス: <sp> / <cxnSp> 収集 ============================== */
+
+    /* ===== 2. 1st パス: <sp> / <cxnSp> / <grpSp> 収集 ===================== */
     const allElems = xmlDoc.getElementsByTagName("*");
+    const groupElements = []; // grpSp 要素を一時的に保持
+
     for (const el of allElems) {
         if (el.namespaceURI !== NS_SPREADSHEETDRAWING) continue;
-    
+
         if (el.localName === "sp") {
             const prstEl   = el.querySelector(":scope > spPr > a\\:prstGeom, :scope > spPr > prstGeom");
             const shapeTyp = prstEl ? prstEl.getAttribute("prst") || "custom" : "custom";
+            let item = null;
             if (shapeTyp === "line" || shapeTyp === "lineInv") {
-                const e = processLineShape(el, prefix);
-                if (e) { edges.push(e); elementMap[e.id] = el; }
+                item = processLineShape(el, prefix);
+                if (item) edges.push(item);
             } else {
-                const n = processShapeBase(el, prefix);
-                if (n) { nodes.push(n); elementMap[n.id]  = el; }
+                item = processShapeBase(el, prefix);
+                if (item) nodes.push(item);
             }
+            // item が null でないことを確認してから elementMap に追加
+            if (item && item.id) elementMap[item.id] = el;
         } else if (el.localName === "cxnSp") {
             const e = processConnectorBase(el, prefix);
-            edges.push(e);
-            elementMap[e.id] = el;
-            if (e.source) connectedNodeIds.add(e.source);
-            if (e.target) connectedNodeIds.add(e.target);
-
-            if (!e.source || !e.target) {
-                // console.log(`[UNATTACHED] cxnSp captured: ${e.id} (src=${e.source}, tgt=${e.target})`);
+            // e が null でないことを確認してから処理
+            if (e && e.id) {
+                edges.push(e);
+                elementMap[e.id] = el;
+                if (e.source) connectedNodeIds.add(e.source);
+                if (e.target) connectedNodeIds.add(e.target);
+                 if (!e.source || !e.target) {
+                     // console.log(`[UNATTACHED] cxnSp captured: ${e.id} (src=${e.source}, tgt=${e.target})`);
+                 }
+            }
+        } else if (el.localName === "grpSp") {
+            // grpSp 要素は後でまとめて処理するため、ここでは収集のみ
+            groupElements.push(el);
+            // elementMap にも追加しておく（ID取得のため）
+            const grpId = getGroupId(el, prefix);
+            if (grpId) {
+                elementMap[grpId] = el;
             }
         }
     }
-    
-    // 一応残しておく
-    /* ---------- grpSp による groupId 付与 ---------- */
-    //for (const id in elementMap) {
-    //    let p = elementMap[id].parentElement;
-    //    while (
-    //        p &&
-    //        !(
-    //            p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp"
-    //        )
-    //    )
-    //        p = p.parentElement;
-    //    if (p) {
-    //        const gid = getGroupId(p, prefix);
-    //        if (gid) {
-    //            const it =
-    //                nodes.find((n) => n.id === id) || edges.find((e) => e.id === id);
-    //            if (it) it.groupId = gid;
-    //            console.log("[setGroupId]", it);
-    //        }
-    //    }
-    //}
 
-    /* ===== 3. ノード矩形マップ (グループ化前) ============================ */
+    /* ===== 3. ノード矩形マップ & from/to 座標格納 (グループ化前) ======== */
     const nodeRectMap = {};
+    // nodes 配列にはこの時点では sp 由来のノードのみが含まれる
     nodes.forEach(n => {
-        const pFrom = getAnchorEndpoint(elementMap[n.id], "from");
-        const pTo   = getAnchorEndpoint(elementMap[n.id], "to");
-        nodeRectMap[n.id] = {
-            minRow: Math.min(pFrom.row, pTo.row),
-            maxRow: Math.max(pFrom.row, pTo.row),
-            minCol: Math.min(pFrom.col, pTo.col),
-            maxCol: Math.max(pFrom.col, pTo.col)
-        };
+        const el = elementMap[n.id]; // sp 由来の要素のみのはず
+        if (el && el.localName === "sp") { //念のため sp 要素か確認
+            const pFrom = getAnchorEndpoint(el, "from");
+            const pTo   = getAnchorEndpoint(el, "to");
+            n.fromRow = pFrom.row;
+            n.fromCol = pFrom.col;
+            n.toRow = pTo.row;
+            n.toCol = pTo.col;
+            nodeRectMap[n.id] = {
+                minRow: Math.min(pFrom.row, pTo.row),
+                maxRow: Math.max(pFrom.row, pTo.row),
+                minCol: Math.min(pFrom.col, pTo.col),
+                maxCol: Math.max(pFrom.col, pTo.col)
+            };
+        } else {
+            // 万が一 sp 以外が含まれていた場合のフォールバック
+            n.fromRow = Infinity; n.fromCol = Infinity;
+            n.toRow = Infinity; n.toCol = Infinity;
+            if (!nodeRectMap[n.id]) { // 既存のエントリがなければ初期化
+                 nodeRectMap[n.id] = {minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity};
+            }
+        }
     });
-    
-    /* ===== 4. 近傍補完 (グループ化前なので従来通り動く) =================== */
+
+    /* ===== 4. 近傍補完 (グループ化前) =================================== */
+    // edges 配列内のコネクタ (cxnSp または line sp) に対して実行
     edges.forEach(e => {
-        // console.log("e", e);
+        const edgeElement = elementMap[e.id]; // cxnSp または line sp 要素を取得
+        if (!edgeElement) return;
+
         /* --- source --- */
         if (!e.source) {
-            const pos = getAnchorEndpoint(elementMap[e.id], "from");
+            const pos = getAnchorEndpoint(edgeElement, "from");
             // console.log("source edgePos", pos);
-            
+
             let best = Infinity, nearest = null;
+            // 接続先候補は sp 由来のノードのみとする (nodeRectMap にはその矩形のみが存在)
             for (const nid in nodeRectMap) {
-                const d = dist(nodeRectMap[nid], pos);
-                if (d < best) { best = d; nearest = nid; }
+                 const nodeElement = elementMap[nid];
+                 // 接続候補が sp であること、かつ矩形情報が存在することを確認
+                 if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
+                     const d = dist(nodeRectMap[nid], pos);
+                     if (d < best) { best = d; nearest = nid; }
+                 }
             }
             // console.log("nearest", nearest);
             // console.log("best", best);
             if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
                 e.source = nearest;
-                connectedNodeIds.add(nearest);
+                connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
                 // console.log(`[FIXED] ${e.id} source -> ${nearest} (d=${best})`);
             }
         }
         /* --- target --- */
         if (!e.target) {
-            const pos = getAnchorEndpoint(elementMap[e.id], "to");
+            const pos = getAnchorEndpoint(edgeElement, "to");
             // console.log("target edgePos", pos);
             let best = Infinity, nearest = null;
             for (const nid in nodeRectMap) {
-                const d = dist(nodeRectMap[nid], pos);
-                if (d < best) { best = d; nearest = nid; }
+                 const nodeElement = elementMap[nid];
+                 if (nodeElement && nodeElement.localName === "sp" && nodeRectMap[nid]) {
+                    const d = dist(nodeRectMap[nid], pos);
+                    if (d < best) { best = d; nearest = nid; }
+                }
             }
             // console.log("nearest", nearest);
             // console.log("best", best);
             if (nearest && best <= window.NEAR_SHAPE_THRESHOLD) {
                 e.target = nearest;
-                connectedNodeIds.add(nearest);
+                connectedNodeIds.add(nearest); // 接続された sp ノード ID を記録
                 // console.log(`[FIXED] ${e.id} target -> ${nearest} (d=${best})`);
             }
         }
     });
-    
-    /* ===== 5. grpSp 親集約 ============================================== */
-    const nodeToTopGroup  = {};                    // 子ID → 親GID
-    const groupAggregates = {};                    // 親GID → {labelParts, childIds}
-    
-    nodes.forEach(n => {
-        const el = elementMap[n.id];
-        if (!el) return;
-        let p = el.parentElement, topGrp = null;
-        while (p) {
-            if (p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp")
-                topGrp = p;
-            p = p.parentElement;
+
+    /* ===== 5. グループ処理 (ロジック切り替え) ============================ */
+    if (window.USE_LEGACY_GROUPING_LOGIC) {
+        /* ----------【旧ロジック】 Type: "group", GroupID/ParentGroupID 付与 ---------- */
+        // console.log("[INFO] Using legacy grouping logic (Type: group, hierarchy).");
+
+        // 1. グループノード (Type: group) を生成して nodes 配列に追加
+        const groupNodesToAdd = [];
+        groupElements.forEach(grpSp => {
+            const grpId = getGroupId(grpSp, prefix);
+            if (grpId) {
+                const cNvPr = grpSp.querySelector(":scope > nvGrpSpPr > cNvPr");
+                const label = cNvPr ? (cNvPr.getAttribute("name") || cNvPr.getAttribute("descr") || "") : "";
+                const parentGroupId = findParentGroupId(grpSp, prefix);
+
+                groupNodesToAdd.push({
+                    id: grpId,
+                    type: "group", // ★ 旧ロジックでは Type: "group"
+                    label: label.trim(),
+                    hasText: label.trim() !== "",
+                    ParentGroupID: parentGroupId,
+                    GroupID: null,
+                    fromRow: Infinity, fromCol: Infinity, toRow: Infinity, toCol: Infinity
+                });
+                nodeRectMap[grpId] = {minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity};
+            }
+        });
+        nodes.push(...groupNodesToAdd);
+
+        // 2. 既存のノード (sp由来) とエッジに GroupID を設定
+        const elementsToProcess = [...nodes, ...edges].filter(item => item.type !== "group"); // group ノードは除く
+        elementsToProcess.forEach(item => {
+            const element = elementMap[item.id];
+            if (element) {
+                let p = element.parentElement;
+                let directParentGrpId = null;
+                while (p) {
+                    if (p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp") {
+                        directParentGrpId = getGroupId(p, prefix);
+                        break;
+                    }
+                    p = p.parentElement;
+                }
+                item.GroupID = directParentGrpId;
+            }
+        });
+
+    } else {
+        /* ----------【新ロジック】 Type: "groupAggregation", 親集約 ---------- */
+        // console.log("[INFO] Using new grouping logic (Type: groupAggregation, aggregation).");
+        const nodeToTopGroup  = {};
+        const groupAggregates = {};
+
+        // nodes 配列 (sp由来ノードのみ) を対象に実行
+        nodes.forEach(n => {
+            const el = elementMap[n.id];
+            if (!el || el.localName !== "sp") return;
+
+            let p = el.parentElement, topGrp = null;
+            while (p) {
+                if (p.namespaceURI === NS_SPREADSHEETDRAWING && p.localName === "grpSp")
+                    topGrp = p;
+                p = p.parentElement;
+            }
+            if (topGrp) {
+                const gid = getGroupId(topGrp, prefix);
+                if (gid) {
+                    nodeToTopGroup[n.id] = gid;
+                    if (!groupAggregates[gid])
+                        groupAggregates[gid] = { labelParts: [], childIds: [] };
+                    if (n.label && n.hasText)
+                        groupAggregates[gid].labelParts.push(n.label);
+                    groupAggregates[gid].childIds.push(n.id);
+                }
+            }
+        });
+
+        /* --- 親グループノード (Type: groupAggregation) 生成 --- */
+        const groupNodes = [];
+        for (const gid in groupAggregates) {
+            const label = groupAggregates[gid].labelParts.join(window.GROUP_LABEL_SEPARATOR);
+            groupNodes.push({
+                id: gid,
+                type: "groupAggregation", // ★ 新ロジックでは Type: "groupAggregation"
+                label: label,
+                hasText: label !== "",
+                ParentGroupID: null, // 新ロジックでは階層は追わない
+                GroupID: null,
+                fromRow: Infinity, fromCol: Infinity, toRow: Infinity, toCol: Infinity
+             });
         }
-        if (topGrp) {
-            const gid = getGroupId(topGrp, prefix);
-            if (gid) {
-                nodeToTopGroup[n.id] = gid;
-                if (!groupAggregates[gid])
-                    groupAggregates[gid] = { labelParts: [], childIds: [] };
-                if (n.label && n.hasText)
-                    groupAggregates[gid].labelParts.push(n.label);
-                groupAggregates[gid].childIds.push(n.id);
+
+        /* --- 端点を親へ付け替え --- */
+        edges.forEach(e => {
+            if (e.source && nodeToTopGroup[e.source]) e.source = nodeToTopGroup[e.source];
+            if (e.target && nodeToTopGroup[e.target]) e.target = nodeToTopGroup[e.target];
+        });
+
+        /* --- 子ノード削除・親ノード追加 --- */
+        const childSet = new Set(Object.keys(nodeToTopGroup));
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            // type が 'group' でない (つまり sp 由来の) ノードで、
+            // かつ nodeToTopGroup に ID が存在するものを削除
+            if (nodes[i].type !== 'group' && nodes[i].type !== 'groupAggregation' && childSet.has(nodes[i].id)) {
+                 nodes.splice(i, 1);
             }
         }
-    });
-    
-    /* --- 親グループノード生成 --- */
-    const groupNodes = [];
-    for (const gid in groupAggregates) {
-        groupNodes.push({ id: gid, type: "group", label: groupAggregates[gid].labelParts.join(" "), groupId: null });
-    }
-    
-    /* --- 端点を親へ付け替え --- */
-    edges.forEach(e => {
-        if (e.source && nodeToTopGroup[e.source]) e.source = nodeToTopGroup[e.source];
-        if (e.target && nodeToTopGroup[e.target]) e.target = nodeToTopGroup[e.target];
-    });
-    
-    /* --- 子ノード削除・親ノード追加 --- */
-    const childSet = new Set(Object.keys(nodeToTopGroup));
-    for (let i = nodes.length - 1; i >= 0; i--) {
-        if (childSet.has(nodes[i].id)) nodes.splice(i, 1);
-    }
-    nodes.push(...groupNodes);
-    
-    /* --- グループ矩形 = 子のBBox --- */
-    for (const gid in groupAggregates) {
-        let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
-        groupAggregates[gid].childIds.forEach(cid => {
-            const r = nodeRectMap[cid]; if (!r) return;
-            minR = Math.min(minR, r.minRow); maxR = Math.max(maxR, r.maxRow);
-            minC = Math.min(minC, r.minCol); maxC = Math.max(maxC, r.maxCol);
-        });
-        nodeRectMap[gid] = (minR === Infinity)
-            ? { minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity }
-            : { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
-    }
+        nodes.push(...groupNodes); // 生成した groupAggregation ノードを追加
+
+        /* --- グループ矩形 = 子のBBox & グループノードに from/to 座標格納 --- */
+        for (const gid in groupAggregates) {
+            let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+            groupAggregates[gid].childIds.forEach(cid => {
+                const r = nodeRectMap[cid]; // グループ化前の矩形情報 (sp由来ノードのみ)
+                if (!r) return;
+                minR = Math.min(minR, r.minRow); maxR = Math.max(maxR, r.maxRow);
+                minC = Math.min(minC, r.minCol); maxC = Math.max(maxC, r.maxCol);
+            });
+            const groupRect = (minR === Infinity)
+                ? { minRow: Infinity, maxRow: Infinity, minCol: Infinity, maxCol: Infinity }
+                : { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
+            nodeRectMap[gid] = groupRect;
+
+            // nodes 配列から該当の groupAggregation ノードを探す
+            const groupNode = nodes.find(gn => gn.id === gid && gn.type === 'groupAggregation');
+            if (groupNode) {
+                groupNode.fromRow = groupRect.minRow;
+                groupNode.fromCol = groupRect.minCol;
+                groupNode.toRow = groupRect.maxRow;
+                groupNode.toCol = groupRect.maxCol;
+            }
+        }
+    } // <-- End of if/else (grouping logic)
 
     /* ===== 6. 自己ループ・幽霊端点を除去 ================================ */
     for (let i = edges.length - 1; i >= 0; i--) {
         const e = edges[i];
         if (!e.source || !e.target || e.source === e.target) { edges.splice(i, 1); continue; }
-        if (!nodeRectMap[e.source] || !nodeRectMap[e.target]) edges.splice(i, 1);
+        // nodes 配列に存在するIDかチェック (sp, group, groupAggregation が含まれる)
+        const sourceExists = nodes.some(n => n.id === e.source);
+        const targetExists = nodes.some(n => n.id === e.target);
+        if (!sourceExists || !targetExists) edges.splice(i, 1);
     }
-    
+
     /* ===== 7. 最終フィルタリング ======================================= */
     const finalNodes = nodes.filter(n =>
         //(n.type === "group" || true) &&
@@ -565,23 +775,8 @@ function extractStructure(xmlDoc, drawingPath) {
         (true)
     );
 
-    /* ===== 8. 位置情報付与 (min/max の中央値を整数化) ================== */
-    finalNodes.forEach(n => {
-        const rect = nodeRectMap[n.id];
-        if (rect) {
-            const rowMid = (rect.minRow + rect.maxRow) / 2;
-            const colMid = (rect.minCol + rect.maxCol) / 2;
-            n.row = Number.isFinite(rowMid) ? Math.round(rowMid) : null;
-            n.col = Number.isFinite(colMid) ? Math.round(colMid) : null;
-        } else {
-            n.row = null;
-            n.col = null;
-        }
-    });
-
     return { nodes: finalNodes, edges: finalEdges };
-    }
-    
+}    
 
 
 /* ---------- 6. 図形内テキスト抽出（Shape / Connector で共用） ---------- */
