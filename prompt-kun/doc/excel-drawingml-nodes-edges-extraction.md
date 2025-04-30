@@ -1,6 +1,22 @@
 ## Excel DrawingML (`drawing*.xml`) から Nodes/Edges を抽出する仕様解説
 
-Excelファイル (.xlsx) 内の図形描画情報（DrawingML）を解析し、シート上の図形（Node）とそれらを繋ぐ線（Edge）を構造化されたテキスト形式で抽出することを目的としています。ここでは、その抽出ロジック、特に `drawing*.xml` の仕様とコードの関連について、ナレッジとして活用できるように詳しく解説します。
+### 機能概要
+
+このドキュメントで解説するコードは、Excelファイル (.xlsx) に含まれる図形描画情報 (DrawingML) を解析し、シート上の図形とそれらを繋ぐ線を構造化されたテキストデータとして抽出する機能を提供します。主な機能は以下の通りです。
+
+*   **Node (図形) 抽出:** シート上のオートシェイプ、テキストボックスなどを「Node」として認識し、ID、種類 (rectangle, ellipse など)、テキストラベル、セル座標に基づいた位置情報を抽出します。
+*   **Edge (コネクタ/直線) 抽出:** 図形間を接続するコネクタや、単純な直線を「Edge」として認識し、ID、種類、テキストラベル、接続元 (Source) と接続先 (Target) のNode IDを抽出します。
+*   **接続情報の解析:** コネクタ要素 (`<xdr:cxnSp>`) が持つ接続先ID (`<a:stCxn>`, `<a:endCxn>`) を解析します。
+*   **近傍接続補完 (オプション):** 直線要素 (`<xdr:sp prst="line">`) や未接続のコネクタ端点について、座標的に最も近い図形 (Node) を探索し、接続情報を補完します (`ENABLE_NEARBY_COMPLETION` フラグ)。
+*   **グループ処理 (選択可能):** 図形のグループ (`<xdr:grpSp>`) を処理する2つのロジックを提供します。
+    *   **階層型:** グループ自体を独立したNode (`type: "group"`) として扱い、XMLの階層を保持します。
+    *   **集約型 (デフォルト):** グループ内の図形を一つの集約Node (`type: "groupAggregation"`) にまとめ、テキストを集約し、接続されていたEdgeを付け替えます (`USE_LEGACY_GROUPING_LOGIC` フラグ)。
+*   **座標計算:** DrawingML内のEMU単位の位置情報を、シートのセル座標 (行/列の小数値) に変換します。出力形式 (バウンディングボックス、中心点、左上点) は選択可能です (`NODE_POSITION_OUTPUT_MODE` フラグ)。
+*   **空ノード接続付け替え (オプション):** テキストを持たない図形 (空ノード) への接続を、その空ノードを包含する別の意味のあるノードへと自動的に付け替えます (`ENABLE_CONNECTOR_RETARGETING` フラグ)。
+*   **フィルタリング:** 接続情報を持たない孤立した空ノードや、存在しないノードを指すエッジ（幽霊端点）などを除去します。
+*   **構造化テキスト出力:** 抽出したNodesとEdgesの情報を、指定されたフォーマットのテキストとして出力します。
+
+以下のセクションでは、これらの機能を実現するためのDrawingMLの仕様と、コード内の具体的な処理ロジックについて詳しく解説します。
 
 ### 1. Excel DrawingML (`drawing*.xml`) の概要
 
@@ -467,7 +483,7 @@ Excel の `drawing*.xml` ファイルがどのような構造になっている�
     *   **旧 (`true`):** `type="group"`, `id="drawing1_10"` のNode生成。Node 11, 12, Edge 13 に `GroupID="drawing1_10"` 付与。
     *   **新 (`false`):** `type="groupAggregation"`, `id="drawing1_10"` のNode生成。Label は `"要素 A\n要素 B"` (区切り文字が `\n` の場合)。Node 11, 12 を削除 (`nodes` 配列から)。Edge 13 の Source を `drawing1_11` -> `drawing1_10`、Target を `drawing1_12` -> `drawing1_10` に変更。Node 10 の座標を Node 11, 12 の範囲で計算。
 6.  **接続先付け替え (`ENABLE_CONNECTOR_RETARGETING = true` の場合):** もし Node 1 などがテキストを持たない (`hasText=false`) 場合、それに接続している Edge 3 などは、Node 1 を包含する別の Node (もしあれば) に接続先が付け替えられる可能性があります（このサンプルでは該当なし）。
-7.  **幽霊端点除去:** Edge 3, 4, 13 について、`source`/`target` が `null` でないか、存在するNode ID (`nodes` 配列内) を指しているか確認。もし新ロジックの場合、Edge 13 の Source/Target が `drawing1_10` に変更されており、自己ループ (`source === target`) となるため、この段階でEdge 13が除去される。
+7.  **幽霊端点除去:** Edge 3, 4, 13 について、`source` または `target` が `null` (補完・付け替え後も未接続) または存在しないNode IDを指しているか確認。
 8.  **最終フィルタリング:**
     *   **Nodes:** テキストを持たず、どこからも接続されていないNodeがあれば削除（このサンプルでは該当なし）。旧ロジックの場合、`type: "group"` の Node 10 は残る。新ロジックの場合、`type: "groupAggregation"` の Node 10 は残る。
     *   **Edges:** 最終的に残った Edge (例: Edge 3、補完されていれば Edge 4) がリストに含まれる。
