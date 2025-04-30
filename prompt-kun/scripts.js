@@ -138,7 +138,7 @@ if (typeof window.formatToTextBySheet === "undefined") {
                         const groupInfo   = node.GroupID ? `GroupID:${node.GroupID}, `.replace(/drawing/g, '') : "";
                         const parentGroupInfo = node.ParentGroupID ? `ParentGroupID:${node.ParentGroupID}`.replace(/drawing/g, '') : "";
                         // TypeInfo を先頭に追加
-                        output += `ID:${node.id.replace(/drawing/g, '')}, ${typeInfo}${groupInfo}${parentGroupInfo}\n`.replace(/, $/,'\\n'); // 末尾の不要なカンマを削除
+                        output += `ID:${node.id.replace(/drawing/g, '')}, ${typeInfo}${groupInfo}${parentGroupInfo}\n`.replace(/,\s*$/,'') + `\n`; // 末尾の不要なカンマを削除
                     } else {
                         // Type: "group" 以外の場合 (既存のロジック)
                         const nodeLabel   = node.label || ""; // label が undefined の場合を考慮
@@ -216,7 +216,7 @@ if (typeof window.formatToTextBySheet === "undefined") {
                     // Type情報を条件付きで生成
                     const typeInfo = window.OUTPUT_NODE_TYPE ? `Type:${edge.type}, ` : "";
                     // エッジには ParentGroupID は通常不要
-                    output += `ID:${edge.id.replace(/drawing/g, '')}, ${typeInfo}Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '').replace(/, $/,'\\n') + `\n`; // 末尾の不要なカンマを削除
+                    output += `ID:${edge.id.replace(/drawing/g, '')}, ${typeInfo}Source:${edge.source}, Target:${edge.target}${groupInfo}`.replace(/drawing/g, '').replace(/,\s*$/,'') + `\n`; // 末尾の不要なカンマを削除
                 });
             } else {
                 output += "(No edges extracted for this sheet)\n";
