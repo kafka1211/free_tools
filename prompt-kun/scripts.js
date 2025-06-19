@@ -79,6 +79,13 @@ if (typeof window.OUTPUT_NODE_TYPE === "undefined") {
 }
 
 /*  …………………………………………………………………………………………………………………………
+    ★★ 追加: 非表示シート除外制御フラグ ★★
+    ………………………………………………………………………………………………………………………… */
+if (typeof window.EXCLUDE_HIDDEN_SHEETS === "undefined") {
+    window.EXCLUDE_HIDDEN_SHEETS = true; // デフォルトで非表示シートを除外
+}
+
+/*  …………………………………………………………………………………………………………………………
     ★★ 追加: 空ノードへの接続を覆うノードへ付け替える機能のスイッチ ★★
     ………………………………………………………………………………………………………………………… */
 if (typeof window.ENABLE_CONNECTOR_RETARGETING === "undefined") {
@@ -1778,7 +1785,39 @@ async function readExcelFile(file) {
 
         let text = "";
 
-        /* ③ 先に図形を一括抽出し "シート名 → 図形テキスト" へ整形 */
+        /* ③ workbook.xml から直接非表示シート情報を取得 */
+        const hiddenSheetsSet = new Set();
+        if (window.EXCLUDE_HIDDEN_SHEETS) {
+            try {
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
+                if (workbookXml) {
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(workbookXml, "application/xml");
+                    
+                    // 名前空間を考慮して sheet 要素を取得
+                    const sheetElements = xmlDoc.querySelectorAll("sheet, workbook > sheets > sheet");
+                    console.log(`[DEBUG] Found ${sheetElements.length} sheet elements in workbook.xml`);
+                    
+                    for (let i = 0; i < sheetElements.length; i++) {
+                        const sheet = sheetElements[i];
+                        const name = sheet.getAttribute("name");
+                        const state = sheet.getAttribute("state");
+                        console.log(`[DEBUG] Sheet in XML: name="${name}", state="${state}"`);
+                        
+                        // state属性があり、かつhiddenまたはveryHiddenの場合のみ非表示シートとして扱う
+                        if (name && state && (state === "hidden" || state === "veryHidden")) {
+                            hiddenSheetsSet.add(name);
+                            console.log(`[DEBUG] Found hidden sheet via XML: ${name} (state: ${state})`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("[DEBUG] Could not parse workbook.xml for hidden sheets:", e);
+            }
+        }
+
+        /* ④ 先に図形を一括抽出し "シート名 → 図形テキスト" へ整形 */
         const structuredShapeText = await extractStructuredShapesFromExcel(arrayBuffer);
         const shapeTextMap        = {};   // { sheetName : string }
 
@@ -1792,13 +1831,45 @@ async function readExcelFile(file) {
             }
         }
 
-        /* ④ シート順にセル情報 → コメント → 図形を出力 */
-        workbook.SheetNames.forEach(sheetName => {
-            const sheet    = workbook.Sheets[sheetName];
+        /* ⑤ シート順にセル情報 → コメント → 図形を出力 */
+        workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+            // デバッグ用：ワークブック情報とシート情報をログ出力
+            if (window.EXCLUDE_HIDDEN_SHEETS) {
+                console.log(`[DEBUG] Processing sheet: ${sheetName}, index: ${sheetIndex}`);
+                console.log(`[DEBUG] Available sheet names:`, workbook.SheetNames);
+                console.log(`[DEBUG] Workbook.Sheets available:`, !!workbook.Sheets);
+                console.log(`[DEBUG] Workbook.Workbook available:`, !!workbook.Workbook);
+                if (workbook.Workbook && workbook.Workbook.Sheets) {
+                    console.log(`[DEBUG] Sheet info for ${sheetName}:`, workbook.Workbook.Sheets[sheetIndex]);
+                }
+            }
+
+            // 非表示シートをスキップ（設定で有効な場合のみ）
+            if (window.EXCLUDE_HIDDEN_SHEETS) {
+                // まずXMLから直接取得した非表示シート情報でチェック
+                if (hiddenSheetsSet.has(sheetName)) {
+                    console.log(`[DEBUG] Skipping hidden sheet (via XML): ${sheetName}`);
+                    return; // 非表示シートをスキップ
+                }
+                
+                // 次にSheetJSの情報でチェック
+                if (workbook.Workbook && workbook.Workbook.Sheets) {
+                    const sheetInfo = workbook.Workbook.Sheets[sheetIndex];
+                    if (sheetInfo && (sheetInfo.Hidden === 1 || sheetInfo.Hidden === 2 || sheetInfo.state === 'hidden' || sheetInfo.state === 'veryHidden')) {
+                        console.log(`[DEBUG] Skipping hidden sheet (via SheetJS): ${sheetName}`);
+                        return; // 非表示シートをスキップ
+                    }
+                }
+            }
+            const sheet    = workbook.Sheets ? workbook.Sheets[sheetName] : null;
+            if (!sheet) {
+                console.warn(`[DEBUG] Sheet not found: ${sheetName}`);
+                return;
+            }
             const sheetRef = sheet['!ref'];
             let   jsonData = [];
 
-            /* ---------- 4-1. セルの TSV 抽出（元ロジックそのまま） ---------- */
+            /* ---------- 4-1. セルの TSV 抽出（非表示セル除外対応） ---------- */
             if (sheetRef) {
                 const range = XLSX.utils.decode_range(sheetRef);
                 jsonData    = Array(range.e.r + 1).fill(null)
@@ -1806,6 +1877,7 @@ async function readExcelFile(file) {
 
                 for (let R = range.s.r; R <= range.e.r; ++R) {
                     for (let C = range.s.c; C <= range.e.c; ++C) {
+
                         const cellAddr = { r: R, c: C };
                         const cellRef  = XLSX.utils.encode_cell(cellAddr);
                         const cell     = sheet[cellRef];
