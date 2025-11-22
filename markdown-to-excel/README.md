@@ -5,8 +5,6 @@
 - ブラウザ上で動作するクライアントサイドの Markdown から Excel(.xlsx) への変換ツールです。
 - JavaScript (ExcelJS) を利用して、入力された Markdown をその場で Excel ファイルに変換し、ダウンロード可能にします。
 
-![markdown-to-excelの画面イメージ](image.png)
-
 ## バージョン情報
 
 **Current Version: 1.1**
