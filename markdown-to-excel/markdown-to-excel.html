@@ -105,7 +105,7 @@
 <body>
   <div class="container">
     <h1>Markdown to Excel</h1>
-    <p class="version">ver1.1</p>
+    <p class="version">ver1.2</p>
     <textarea id="markdownInput" placeholder="ここにMarkdownを入力してください..."></textarea>
     <div class="controls">
       <button onclick="convertMarkdownToExcel()">Excelに変換</button>
@@ -169,7 +169,7 @@
           // 8: Italic *...* -> 9: content
           // 10: Italic _..._ -> 11: content
           // 12: Strike ~~...~~ -> 13: content
-          const regex = /(\[(.*?)\]\((.*?)\))|(\*\*(.*?)\*\*)|(__(.*?)__)|(\*(.*?)\*)|(_(.*?)_)|(~~(.*?)~~)/g;
+          const regex = /(\[([\s\S]*?)\]\(([\s\S]*?)\))|(\*\*([\s\S]*?)\*\*)|(__([\s\S]*?)__)|(\*([\s\S]*?)\*)|(_([\s\S]*?)_)|(~~([\s\S]*?)~~)/g;
 
           let lastIndex = 0;
           let m;
@@ -216,8 +216,10 @@
       };
 
       const applyStylesToCell = (cell, parts, isTableCell = false, isHeaderCell = false, alignment = null) => {
-        // デフォルトの配置設定（テキスト折り返し無効）
-        const defaultAlignment = { vertical: "top", wrapText: false, ...alignment };
+        // 改行が含まれているかチェック
+        const hasNewLine = parts && parts.some(part => part.text && part.text.includes('\n'));
+        // デフォルトの配置設定（テキスト折り返し無効、ただし改行がある場合は有効）
+        const defaultAlignment = { vertical: "top", wrapText: hasNewLine, ...alignment };
         cell.alignment = defaultAlignment;
 
         if (!parts || parts.length === 0) {
@@ -326,7 +328,7 @@
         if (trimmedLine.startsWith("|") && trimmedLine.includes("|", 1)) {
           // テーブルブロック中であることをフラグで管理
           inTable = true;
-          const cells = trimmedLine.split("|").map(cell => cell.trim());
+          const cells = trimmedLine.split("|").map(cell => cell.trim().replace(/<br\s*\/?>/gi, '\n'));
           // 最初と最後の空セルを削除
           if (cells[0] === "") cells.shift();
           if (cells[cells.length - 1] === "") cells.pop();
